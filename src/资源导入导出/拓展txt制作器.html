@@ -1,0 +1,917 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>拓展.txt 制作器</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --bg: #f5f7fb;
+        --panel: #ffffff;
+        --panel-muted: #eef3ff;
+        --text: #1f2937;
+        --subtle: #6b7280;
+        --border: #d7dfef;
+        --primary: #2563eb;
+        --primary-deep: #1d4ed8;
+        --danger: #dc2626;
+        --danger-deep: #b91c1c;
+        --success: #059669;
+        --shadow: 0 18px 48px rgba(37, 99, 235, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family:
+          "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei",
+          sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, #dbeafe 0, transparent 32%),
+          radial-gradient(circle at top right, #fde68a 0, transparent 24%),
+          linear-gradient(180deg, #f8fbff 0%, var(--bg) 100%);
+      }
+
+      .page {
+        max-width: 1420px;
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      .hero {
+        margin-bottom: 18px;
+        padding: 24px;
+        background: linear-gradient(135deg, #eff6ff 0%, #fffdf2 100%);
+        border: 1px solid #dbeafe;
+        border-radius: 24px;
+        box-shadow: var(--shadow);
+      }
+
+      .hero h1 {
+        margin: 0 0 8px;
+        font-size: 30px;
+        line-height: 1.1;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 4px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 420px) minmax(360px, 1fr) minmax(320px, 420px);
+        gap: 18px;
+        align-items: start;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 22px;
+        box-shadow: var(--shadow);
+        overflow: hidden;
+      }
+
+      .panel-header {
+        padding: 16px 18px 12px;
+        border-bottom: 1px solid var(--border);
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+      }
+
+      .panel-header h2 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .panel-header small {
+        display: block;
+        margin-top: 6px;
+        color: var(--subtle);
+        line-height: 1.5;
+      }
+
+      .panel-body {
+        padding: 16px 18px 18px;
+      }
+
+      .field-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 12px;
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 6px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      input[type="text"],
+      textarea {
+        width: 100%;
+        border: 1px solid var(--border);
+        border-radius: 14px;
+        padding: 12px 14px;
+        font: inherit;
+        color: var(--text);
+        background: #fff;
+        outline: none;
+        transition:
+          border-color 0.16s ease,
+          box-shadow 0.16s ease;
+      }
+
+      input[type="text"]:focus,
+      textarea:focus {
+        border-color: #93c5fd;
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+      }
+
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+        line-height: 1.6;
+      }
+
+      .hint {
+        margin-top: 6px;
+        color: var(--subtle);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+
+      .check {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        color: var(--subtle);
+        cursor: pointer;
+      }
+
+      .button-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      button,
+      .file-trigger {
+        appearance: none;
+        border: none;
+        border-radius: 999px;
+        background: #e5edff;
+        color: #1e3a8a;
+        padding: 10px 16px;
+        font: inherit;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          transform 0.12s ease,
+          background 0.16s ease,
+          color 0.16s ease;
+      }
+
+      button:hover,
+      .file-trigger:hover {
+        background: #dbeafe;
+        transform: translateY(-1px);
+      }
+
+      button.primary {
+        background: var(--primary);
+        color: #fff;
+      }
+
+      button.primary:hover {
+        background: var(--primary-deep);
+      }
+
+      button.danger {
+        background: #fee2e2;
+        color: #991b1b;
+      }
+
+      button.danger:hover {
+        background: #fecaca;
+      }
+
+      button.ghost {
+        background: #f3f4f6;
+        color: #374151;
+      }
+
+      button:disabled {
+        opacity: 0.56;
+        transform: none;
+        cursor: not-allowed;
+      }
+
+      .hidden-file {
+        display: none;
+      }
+
+      .status {
+        min-height: 24px;
+        margin-top: 12px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: var(--subtle);
+      }
+
+      .status.success {
+        color: var(--success);
+      }
+
+      .status.error {
+        color: var(--danger);
+      }
+
+      .entry-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .entry-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 12px 14px;
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        background: linear-gradient(180deg, #ffffff 0%, #fbfdff 100%);
+        cursor: pointer;
+        transition:
+          border-color 0.16s ease,
+          box-shadow 0.16s ease,
+          transform 0.12s ease;
+      }
+
+      .entry-row:hover {
+        border-color: #bfdbfe;
+        transform: translateY(-1px);
+      }
+
+      .entry-row.active {
+        border-color: #93c5fd;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+        background: #eff6ff;
+      }
+
+      .entry-row-name {
+        min-width: 0;
+        flex: 1;
+        font-size: 14px;
+        font-weight: 700;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .entry-row-delete {
+        flex-shrink: 0;
+        padding: 8px 12px;
+        font-size: 12px;
+      }
+
+      .empty {
+        padding: 18px;
+        border: 1px dashed var(--border);
+        border-radius: 18px;
+        background: var(--panel-muted);
+        color: var(--subtle);
+        line-height: 1.6;
+      }
+
+      .preview-box {
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        background: #fcfdff;
+      }
+
+      .preview-box pre {
+        margin: 0;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font: 13px/1.6 Consolas, "Courier New", monospace;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #eff6ff;
+        color: #1d4ed8;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      @media (max-width: 1180px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .page {
+          padding: 16px;
+        }
+
+        .hero {
+          padding: 18px;
+          border-radius: 18px;
+        }
+
+        .hero h1 {
+          font-size: 24px;
+        }
+
+        .field-row {
+          grid-template-columns: 1fr;
+        }
+
+        .entry-list {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <section class="hero">
+        <h1>拓展.txt 制作器</h1>
+        <div class="toolbar">
+          <span class="pill" id="entryCount">当前 0 条</span>
+          <span class="pill" id="currentMode">正在新增</span>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>编辑器</h2>
+            <small>填好字段后可新增或保存修改。ID 默认自动跟随拓展名/URL 生成，也可以手动改。</small>
+          </div>
+          <div class="panel-body">
+            <div class="field-grid">
+              <div>
+                <label for="extName">拓展名</label>
+                <input id="extName" type="text" placeholder="例如：酒馆助手" />
+              </div>
+
+              <div class="field-row">
+                <div>
+                  <label for="domesticUrl">国内 URL</label>
+                  <input id="domesticUrl" type="text" placeholder="https://..." />
+                </div>
+                <div>
+                  <label for="foreignUrl">国外 URL</label>
+                  <input id="foreignUrl" type="text" placeholder="https://github.com/..." />
+                </div>
+              </div>
+
+              <div>
+                <label for="featureText">功能</label>
+                <textarea
+                  id="featureText"
+                  placeholder="可以写一行，也可以写多行，导出时会保留。"
+                ></textarea>
+              </div>
+
+              <div>
+                <label for="extId">拓展 ID</label>
+                <input id="extId" type="text" placeholder="自动生成" />
+                <div class="button-row" style="margin-top: 8px">
+                  <label class="check">
+                    <input id="autoIdToggle" type="checkbox" checked />
+                    ID 自动更新
+                  </label>
+                  <button type="button" class="ghost" id="regenIdBtn">重新生成 ID</button>
+                </div>
+                <div class="hint">
+                  默认优先取 GitHub 仓库名；如果不是 GitHub，就按拓展名生成一个适合文件夹使用的 id。
+                </div>
+              </div>
+
+              <div class="button-row">
+                <button type="button" class="primary" id="saveBtn">新增条目</button>
+                <button type="button" class="ghost" id="resetBtn">清空表单</button>
+                <button type="button" class="danger" id="deleteBtn" disabled>删除当前编辑项</button>
+              </div>
+            </div>
+
+            <div id="status" class="status"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>条目列表</h2>
+            <small>点击“编辑”可继续修改之前的拓展。导入已有文本后也会落在这里，方便继续增加。</small>
+          </div>
+          <div class="panel-body">
+            <div class="button-row" style="margin-bottom: 14px">
+              <label class="file-trigger" for="importFile">导入本地 txt</label>
+              <input id="importFile" class="hidden-file" type="file" accept=".txt,text/plain" />
+              <button type="button" class="ghost" id="importTextBtn">从下面文本导入</button>
+              <button type="button" class="danger" id="clearAllBtn">清空全部</button>
+            </div>
+
+            <div>
+              <label for="importText">已有拓展.txt 内容</label>
+              <textarea
+                id="importText"
+                placeholder="把已有的 拓展.txt 粘贴到这里，然后点“从下面文本导入”。"
+              ></textarea>
+            </div>
+
+            <div id="entryList" class="entry-list" style="margin-top: 16px"></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h2>导出预览</h2>
+            <small>输出格式兼容当前资源导入器的块结构识别。可以复制，也可以下载成 txt。</small>
+          </div>
+          <div class="panel-body">
+            <div class="button-row" style="margin-bottom: 14px">
+              <button type="button" class="primary" id="copyBtn">复制全部</button>
+              <button type="button" class="ghost" id="downloadBtn">下载 txt</button>
+              <button type="button" class="ghost" id="refreshPreviewBtn">刷新预览</button>
+            </div>
+
+            <div class="preview-box">
+              <pre id="previewText"></pre>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const state = {
+        entries: [],
+        editingId: null,
+      };
+
+      const els = {
+        extName: document.getElementById("extName"),
+        domesticUrl: document.getElementById("domesticUrl"),
+        foreignUrl: document.getElementById("foreignUrl"),
+        featureText: document.getElementById("featureText"),
+        extId: document.getElementById("extId"),
+        autoIdToggle: document.getElementById("autoIdToggle"),
+        saveBtn: document.getElementById("saveBtn"),
+        resetBtn: document.getElementById("resetBtn"),
+        deleteBtn: document.getElementById("deleteBtn"),
+        status: document.getElementById("status"),
+        entryList: document.getElementById("entryList"),
+        previewText: document.getElementById("previewText"),
+        importText: document.getElementById("importText"),
+        importTextBtn: document.getElementById("importTextBtn"),
+        importFile: document.getElementById("importFile"),
+        clearAllBtn: document.getElementById("clearAllBtn"),
+        copyBtn: document.getElementById("copyBtn"),
+        downloadBtn: document.getElementById("downloadBtn"),
+        refreshPreviewBtn: document.getElementById("refreshPreviewBtn"),
+        regenIdBtn: document.getElementById("regenIdBtn"),
+        entryCount: document.getElementById("entryCount"),
+        currentMode: document.getElementById("currentMode"),
+      };
+
+      function setStatus(message, type = "") {
+        els.status.textContent = message || "";
+        els.status.className = type ? `status ${type}` : "status";
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#39;");
+      }
+
+      function normalizeIdPiece(value) {
+        return String(value || "")
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/\.git$/i, "")
+          .replace(/[^a-z0-9/_-]+/g, "-")
+          .replace(/-+/g, "-")
+          .replace(/^[-_/]+|[-_/]+$/g, "");
+      }
+
+      function makeBaseId() {
+        const foreignUrl = els.foreignUrl.value.trim();
+        const domesticUrl = els.domesticUrl.value.trim();
+        const name = els.extName.value.trim();
+
+        const fromUrl = (url) => {
+          try {
+            const clean = url.replace(/\.git$/i, "").replace(/\/+$/, "");
+            const last = clean.split("/").pop() || "";
+            return normalizeIdPiece(last);
+          } catch {
+            return "";
+          }
+        };
+
+        return (
+          fromUrl(foreignUrl) ||
+          fromUrl(domesticUrl) ||
+          normalizeIdPiece(name) ||
+          "extension"
+        );
+      }
+
+      function buildUniqueId(baseId, keepCurrent = false) {
+        const base = normalizeIdPiece(baseId) || "extension";
+        const occupied = new Set(
+          state.entries
+            .filter((entry) => !keepCurrent || entry.id !== state.editingId)
+            .map((entry) => entry.id),
+        );
+
+        if (!occupied.has(base)) return base;
+
+        let index = 2;
+        while (occupied.has(`${base}-${index}`)) index += 1;
+        return `${base}-${index}`;
+      }
+
+      function maybeRefreshAutoId() {
+        if (!els.autoIdToggle.checked) return;
+        els.extId.value = buildUniqueId(makeBaseId(), true);
+      }
+
+      function getFormValue() {
+        const name = els.extName.value.trim();
+        const domesticUrl = els.domesticUrl.value.trim();
+        const foreignUrl = els.foreignUrl.value.trim();
+        const feature = els.featureText.value.trim();
+        let id = els.extId.value.trim();
+
+        if (!name) throw new Error("请先填写拓展名");
+        if (!domesticUrl && !foreignUrl) throw new Error("国内 URL 和国外 URL 至少填一个");
+
+        if (!id) id = buildUniqueId(makeBaseId(), true);
+
+        return {
+          id: normalizeIdPiece(id) || buildUniqueId(makeBaseId(), true),
+          name,
+          domesticUrl,
+          foreignUrl,
+          feature,
+        };
+      }
+
+      function resetForm() {
+        state.editingId = null;
+        els.extName.value = "";
+        els.domesticUrl.value = "";
+        els.foreignUrl.value = "";
+        els.featureText.value = "";
+        els.extId.value = "";
+        els.autoIdToggle.checked = true;
+        maybeRefreshAutoId();
+        updateModeText();
+        setStatus("已切回新增模式");
+      }
+
+      function updateModeText() {
+        const editing = state.entries.find((entry) => entry.id === state.editingId);
+        els.currentMode.textContent = editing
+          ? `正在编辑：${editing.name}`
+          : "正在新增";
+        els.saveBtn.textContent = editing ? "保存修改" : "新增条目";
+        els.deleteBtn.disabled = !editing;
+      }
+
+      function loadEntryToForm(id) {
+        const entry = state.entries.find((item) => item.id === id);
+        if (!entry) return;
+        state.editingId = id;
+        els.extName.value = entry.name;
+        els.domesticUrl.value = entry.domesticUrl || "";
+        els.foreignUrl.value = entry.foreignUrl || "";
+        els.featureText.value = entry.feature || "";
+        els.extId.value = entry.id;
+        els.autoIdToggle.checked = false;
+        updateModeText();
+        renderList();
+        setStatus(`正在编辑「${entry.name}」`);
+      }
+
+      function deleteCurrentEntry() {
+        if (!state.editingId) return;
+        const index = state.entries.findIndex((item) => item.id === state.editingId);
+        if (index === -1) return;
+        const [removed] = state.entries.splice(index, 1);
+        refreshAll();
+        resetForm();
+        setStatus(`已删除「${removed.name}」`, "success");
+      }
+
+      function saveEntry() {
+        try {
+          const payload = getFormValue();
+          const uniqueId = buildUniqueId(payload.id, true);
+          payload.id = uniqueId;
+
+          if (state.editingId) {
+            const index = state.entries.findIndex((item) => item.id === state.editingId);
+            if (index !== -1) {
+              state.entries[index] = payload;
+              state.editingId = payload.id;
+              setStatus(`已更新「${payload.name}」`, "success");
+            }
+          } else {
+            state.entries.push(payload);
+            state.editingId = payload.id;
+            setStatus(`已新增「${payload.name}」`, "success");
+          }
+
+          sortEntries();
+          refreshAll();
+          loadEntryToForm(payload.id);
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error), "error");
+        }
+      }
+
+      function sortEntries() {
+        state.entries.sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+      }
+
+      function parseExtensionBlocks(text) {
+        return String(text || "")
+          .split(/\r?\n\s*---\s*\r?\n/g)
+          .map((block) => block.trim())
+          .filter(Boolean);
+      }
+
+      function takeLineValue(lines, keys) {
+        const normalizedKeys = keys.map((key) => key.toLowerCase());
+        for (const line of lines) {
+          const match = line.trim().match(/^([^:：]+)\s*[:：]\s*(.*)$/);
+          if (!match) continue;
+          const key = match[1].trim().toLowerCase();
+          if (normalizedKeys.includes(key)) return (match[2] || "").trim();
+        }
+        return "";
+      }
+
+      function parseExtensionBlock(block) {
+        const lines = String(block || "").split(/\r?\n/);
+        const id = takeLineValue(lines, ["拓展id", "扩展id", "拓展ID", "扩展ID"]);
+        const name = takeLineValue(lines, ["拓展名", "扩展名"]);
+        const domesticUrl = takeLineValue(lines, ["国内url", "国内URL"]);
+        const foreignUrl = takeLineValue(lines, ["国外url", "国外URL", "海外url", "海外URL"]);
+
+        let url = takeLineValue(lines, ["url", "URL"]);
+        let feature = "";
+
+        const featureIndex = lines.findIndex((line) =>
+          /^(功能|拓展功能|扩展功能)\s*[:：]/i.test(line.trim()),
+        );
+        if (featureIndex !== -1) {
+          const firstLine = lines[featureIndex]
+            .trim()
+            .replace(/^(功能|拓展功能|扩展功能)\s*[:：]/i, "")
+            .trim();
+          const tail = lines.slice(featureIndex + 1).join("\n").trim();
+          feature = [firstLine, tail].filter(Boolean).join("\n").trim();
+        }
+
+        const finalDomestic = domesticUrl || (!foreignUrl ? url : "");
+        const finalForeign = foreignUrl || (domesticUrl ? url : "");
+
+        return {
+          id: normalizeIdPiece(id) || "",
+          name: name.trim(),
+          domesticUrl: finalDomestic.trim(),
+          foreignUrl: finalForeign.trim(),
+          feature: feature.trim(),
+        };
+      }
+
+      function buildBlock(entry) {
+        const lines = [`拓展ID: ${entry.id}`, `拓展名: ${entry.name}`];
+        if (entry.domesticUrl) lines.push(`国内URL: ${entry.domesticUrl}`);
+        if (entry.foreignUrl) lines.push(`国外URL: ${entry.foreignUrl}`);
+        if (!entry.domesticUrl && !entry.foreignUrl) lines.push("URL: ");
+        if (entry.feature) {
+          const featureLines = entry.feature.split(/\r?\n/);
+          lines.push(`功能: ${featureLines.shift() || ""}`);
+          for (const line of featureLines) lines.push(line);
+        }
+        return lines.join("\n").trim();
+      }
+
+      function buildOutputText() {
+        if (state.entries.length === 0) return "";
+        return state.entries.map(buildBlock).join("\n---\n") + "\n";
+      }
+
+      function mergeImportedEntries(parsedEntries) {
+        const map = new Map(state.entries.map((entry) => [entry.id, entry]));
+        for (const rawEntry of parsedEntries) {
+          if (!rawEntry.name) continue;
+          const baseId = rawEntry.id || makeBaseId();
+          const id = buildUniqueId(baseId || normalizeIdPiece(rawEntry.name));
+          map.set(id, {
+            id,
+            name: rawEntry.name,
+            domesticUrl: rawEntry.domesticUrl || "",
+            foreignUrl: rawEntry.foreignUrl || "",
+            feature: rawEntry.feature || "",
+          });
+        }
+        state.entries = Array.from(map.values());
+        sortEntries();
+      }
+
+      function importFromText(text) {
+        const blocks = parseExtensionBlocks(text);
+        if (blocks.length === 0) throw new Error("没有识别到可导入的条目");
+        const parsed = blocks.map(parseExtensionBlock).filter((entry) => entry.name);
+        if (parsed.length === 0) throw new Error("导入内容里没有有效条目");
+        mergeImportedEntries(parsed);
+        refreshAll();
+        setStatus(`已导入 ${parsed.length} 条，可继续新增或修改`, "success");
+      }
+
+      async function importFromFile(file) {
+        if (!file) return;
+        const text = await file.text();
+        els.importText.value = text;
+        importFromText(text);
+      }
+
+      async function copyOutput() {
+        const text = buildOutputText();
+        if (!text) {
+          setStatus("当前没有可导出的条目", "error");
+          return;
+        }
+        try {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+          } else {
+            const input = document.createElement("textarea");
+            input.value = text;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand("copy");
+            input.remove();
+          }
+          setStatus("已复制全部文本", "success");
+        } catch (error) {
+          setStatus(`复制失败：${error instanceof Error ? error.message : String(error)}`, "error");
+        }
+      }
+
+      function downloadOutput() {
+        const text = buildOutputText();
+        if (!text) {
+          setStatus("当前没有可导出的条目", "error");
+          return;
+        }
+        const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "拓展.txt";
+        a.click();
+        URL.revokeObjectURL(url);
+        setStatus("已生成下载文件", "success");
+      }
+
+      function renderList() {
+        els.entryCount.textContent = `当前 ${state.entries.length} 条`;
+        if (state.entries.length === 0) {
+          els.entryList.innerHTML =
+            '<div class="empty">还没有条目。你可以直接新增，也可以先把已有的 <code>拓展.txt</code> 导入进来。</div>';
+          return;
+        }
+
+        els.entryList.innerHTML = state.entries
+          .map(
+            (entry) => `
+              <div class="entry-row ${entry.id === state.editingId ? "active" : ""}" data-action="select" data-id="${escapeHtml(entry.id)}">
+                <div class="entry-row-name" title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</div>
+                <button type="button" class="danger entry-row-delete" data-action="delete" data-id="${escapeHtml(entry.id)}">删除</button>
+              </div>
+            `,
+          )
+          .join("");
+      }
+
+      function renderPreview() {
+        els.previewText.textContent = buildOutputText() || "当前没有内容可导出。";
+      }
+
+      function refreshAll() {
+        renderList();
+        renderPreview();
+        updateModeText();
+      }
+
+      els.extName.addEventListener("input", maybeRefreshAutoId);
+      els.domesticUrl.addEventListener("input", maybeRefreshAutoId);
+      els.foreignUrl.addEventListener("input", maybeRefreshAutoId);
+      els.autoIdToggle.addEventListener("change", maybeRefreshAutoId);
+
+      els.saveBtn.addEventListener("click", saveEntry);
+      els.resetBtn.addEventListener("click", resetForm);
+      els.deleteBtn.addEventListener("click", deleteCurrentEntry);
+      els.regenIdBtn.addEventListener("click", () => {
+        els.extId.value = buildUniqueId(makeBaseId(), true);
+        setStatus("已重新生成 ID");
+      });
+
+      els.importTextBtn.addEventListener("click", () => {
+        try {
+          importFromText(els.importText.value);
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error), "error");
+        }
+      });
+
+      els.importFile.addEventListener("change", async (event) => {
+        const file = event.target.files && event.target.files[0];
+        try {
+          await importFromFile(file);
+        } catch (error) {
+          setStatus(error instanceof Error ? error.message : String(error), "error");
+        } finally {
+          event.target.value = "";
+        }
+      });
+
+      els.entryList.addEventListener("click", (event) => {
+        const target = event.target.closest("[data-action][data-id]");
+        if (!target) return;
+        const id = target.getAttribute("data-id");
+        const action = target.getAttribute("data-action");
+        if (!id) return;
+
+        if (action === "select") {
+          loadEntryToForm(id);
+          return;
+        }
+
+        if (action === "delete") {
+          const entry = state.entries.find((item) => item.id === id);
+          if (!entry) return;
+          state.entries = state.entries.filter((item) => item.id !== id);
+          if (state.editingId === id) resetForm();
+          refreshAll();
+          setStatus(`已删除「${entry.name}」`, "success");
+        }
+      });
+
+      els.clearAllBtn.addEventListener("click", () => {
+        state.entries = [];
+        resetForm();
+        refreshAll();
+        setStatus("已清空全部条目");
+      });
+
+      els.copyBtn.addEventListener("click", () => {
+        void copyOutput();
+      });
+      els.downloadBtn.addEventListener("click", downloadOutput);
+      els.refreshPreviewBtn.addEventListener("click", () => {
+        renderPreview();
+        setStatus("已刷新预览");
+      });
+
+      refreshAll();
+      maybeRefreshAutoId();
+    </script>
+  </body>
+</html>
