@@ -79,8 +79,8 @@ export interface ImportEntry extends ManifestItem {
 
 export function getTypeLabel(type: string): string {
   const map: Record<string, string> = {
-    unknown: '请选择类型',
-    auto_json: '自动识别(JSON)',
+    unknown: '无法识别',
+    auto_json: 'JSON自动识别',
     preset: '预设',
     worldbook: '世界书',
     character: '角色卡',

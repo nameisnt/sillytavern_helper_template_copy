@@ -9,16 +9,11 @@ $(() => {
   let app: ReturnType<typeof createApp> | null = null;
   let $iframe: JQuery<HTMLIFrameElement> | null = null;
   let styleDestroy: (() => void) | null = null;
-  let $panicClose: JQuery<HTMLButtonElement> | null = null;
 
   function cleanup() {
     if (app) {
       app.unmount();
       app = null;
-    }
-    if ($panicClose) {
-      $panicClose.remove();
-      $panicClose = null;
     }
     if ($iframe) {
       $iframe.remove();
@@ -35,26 +30,6 @@ $(() => {
 
     const pinia = createPinia();
     app = createApp(App, { onClose: cleanup }).use(pinia);
-
-    $panicClose = $('<button type="button" title="关闭资源导入导出">✕</button>')
-      .appendTo('body')
-      .css({
-        position: 'fixed',
-        top: '12px',
-        right: '12px',
-        zIndex: 100000,
-        width: '34px',
-        height: '34px',
-        borderRadius: '10px',
-        border: '1px solid rgba(0,0,0,0.12)',
-        background: 'rgba(255,255,255,0.92)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-        cursor: 'pointer',
-        fontSize: '18px',
-        lineHeight: '34px',
-        color: '#111',
-      })
-      .on('click', cleanup);
 
     $iframe = createScriptIdIframe()
       .appendTo('body')

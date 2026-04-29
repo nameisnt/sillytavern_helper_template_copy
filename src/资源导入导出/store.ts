@@ -29,6 +29,7 @@ type FileSystemFileHandleLike = {
 
 type DuplicateGroup = {
   id: string;
+  source: Exclude<DuplicateSource, 'none'>;
   compareKey: string;
   label: string;
   entries: ImportEntry[];
@@ -795,6 +796,7 @@ export const useImportStore = defineStore('resource-importer', () => {
   const isExportMode = computed(() => flowMode.value === 'export');
   const canDeleteSourceFiles = computed(() => !!rootDirHandle.value);
   const showDuplicatePanel = ref(false);
+  const duplicatePanelSource = ref<Exclude<DuplicateSource, 'none'>>('mixed');
   const resultDialog = reactive<ResultDialogState>({
     visible: false,
     title: '',
@@ -888,10 +890,10 @@ export const useImportStore = defineStore('resource-importer', () => {
     return flat;
   });
 
-  const duplicateGroups = computed<DuplicateGroup[]>(() => {
+  const allDuplicateGroups = computed<DuplicateGroup[]>(() => {
     const map = new Map<string, DuplicateGroup>();
     for (const entry of entries.value) {
-      if (!entry.duplicateGroupId) continue;
+      if (!entry.duplicateGroupId || !entry.duplicateSource || entry.duplicateSource === 'none') continue;
       const existing = map.get(entry.duplicateGroupId);
       if (existing) {
         existing.entries.push(entry);
@@ -900,6 +902,7 @@ export const useImportStore = defineStore('resource-importer', () => {
       }
       map.set(entry.duplicateGroupId, {
         id: entry.duplicateGroupId,
+        source: entry.duplicateSource,
         compareKey: entry.compareKey || '',
         label: getEntryLabel(entry),
         entries: [entry],
@@ -909,6 +912,31 @@ export const useImportStore = defineStore('resource-importer', () => {
     }
     return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'));
   });
+
+  const duplicateGroupCounts = computed(() => {
+    const counts = {
+      mixed: 0,
+      tavern: 0,
+      folder: 0,
+    };
+    for (const group of allDuplicateGroups.value) counts[group.source]++;
+    return counts;
+  });
+
+  const duplicatePanelSourceResolved = computed<Exclude<DuplicateSource, 'none'>>(() => {
+    if (duplicateGroupCounts.value[duplicatePanelSource.value] > 0) return duplicatePanelSource.value;
+    return (['mixed', 'tavern', 'folder'] as const).find(key => duplicateGroupCounts.value[key] > 0) || 'mixed';
+  });
+
+  const duplicatePanelOptions = computed(() => [
+    { value: 'mixed' as const, label: '酒馆内和资源文件重复', count: duplicateGroupCounts.value.mixed },
+    { value: 'tavern' as const, label: '酒馆内的重复', count: duplicateGroupCounts.value.tavern },
+    { value: 'folder' as const, label: '资源文件的重复', count: duplicateGroupCounts.value.folder },
+  ]);
+
+  const duplicateGroups = computed<DuplicateGroup[]>(() =>
+    allDuplicateGroups.value.filter(group => group.source === duplicatePanelSourceResolved.value),
+  );
 
   const duplicateEntryCount = computed(() => entries.value.filter(entry => entry.duplicateSource && entry.duplicateSource !== 'none').length);
 
@@ -1108,6 +1136,7 @@ export const useImportStore = defineStore('resource-importer', () => {
     duplicateFilter.value = 'all';
     selectedPathPrefix.value = '';
     showDuplicatePanel.value = false;
+    duplicatePanelSource.value = 'mixed';
     isProcessing.value = false;
     tavernResourceIndex.value = new Map();
     closeResultDialog();
@@ -1533,6 +1562,7 @@ export const useImportStore = defineStore('resource-importer', () => {
     duplicateFilter.value = 'all';
     selectedPathPrefix.value = '';
     showDuplicatePanel.value = false;
+    duplicatePanelSource.value = 'mixed';
     isProcessing.value = false;
     exportLoading.value = false;
     importLoading.value = false;
@@ -2661,7 +2691,7 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     if (!item.type || item.type === 'unknown') {
       item.status = 'error';
-      item.errorMessage = '无法识别类型，请手动选择';
+      item.errorMessage = '无法根据所在文件夹识别类型';
       updateStats();
       return;
     }
@@ -2678,8 +2708,8 @@ export const useImportStore = defineStore('resource-importer', () => {
         item.status = 'error';
         item.errorMessage =
           item.file.size > 2 * 1024 * 1024
-            ? '文件较大，自动识别可能不准确，请手动选择类型'
-            : '无法自动识别此 JSON 类型，请手动选择类型';
+            ? '文件较大，自动识别可能不准确，请放到对应文件夹后再导入'
+            : '无法自动识别此 JSON 类型，请放到对应文件夹后再导入';
         updateStats();
         return;
       }
@@ -3262,6 +3292,9 @@ export const useImportStore = defineStore('resource-importer', () => {
     isProcessing,
     canDeleteSourceFiles,
     showDuplicatePanel,
+    duplicatePanelSource,
+    duplicatePanelSourceResolved,
+    duplicatePanelOptions,
     resultDialog,
     preflightDialog,
     deleteConfirmDialog,

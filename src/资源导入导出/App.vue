@@ -167,23 +167,6 @@
                 />
               </div>
               <div class="toolbar-actions">
-                <select
-                  v-if="store.isImportMode"
-                  v-model="bulkType"
-                  class="bulk-type"
-                  title="批量设置类型：选中优先，否则作用于当前筛选结果"
-                  @change="applyBulkType"
-                >
-                  <option value="">批量类型…</option>
-                  <option value="preset">预设</option>
-                  <option value="worldbook">世界书</option>
-                  <option value="character">角色卡</option>
-                  <option value="regex">正则</option>
-                  <option value="chat">聊天</option>
-                  <option value="script">脚本</option>
-                  <option value="theme">美化</option>
-                  <option value="background">背景图</option>
-                </select>
                 <select :value="store.sortKey" class="bulk-type" @change="store.setSort(($event.target as HTMLSelectElement).value as any)">
                   <option value="default">原顺序</option>
                   <option value="name">名称排序</option>
@@ -218,7 +201,6 @@
                 </button>
                 <button class="btn-sm" @click="store.selectAll()">全选</button>
                 <button class="btn-sm" @click="store.deselectAll()">取消全选</button>
-                <button class="btn-sm" :disabled="store.selectedIds.size === 0" @click="store.removeSelectedFromList()">移除选中</button>
                 <button
                   v-if="store.isImportMode"
                   class="btn-sm btn-sm-danger"
@@ -266,13 +248,25 @@
 
             <div v-if="store.isImportMode && store.showDuplicatePanel" class="duplicate-panel">
               <div class="duplicate-panel-header">
-                <div>
+                <div class="duplicate-panel-title">
                   <strong>重复项处理</strong>
-                  <span class="duplicate-panel-subtitle">按“源文件夹重复 / 酒馆内已存在”分组，方便对比删除</span>
+                  <span class="duplicate-panel-subtitle">按你选中的重复来源分组显示，方便集中处理</span>
                 </div>
-                <button class="btn-sm" @click="store.showDuplicatePanel = false">收起</button>
+                <div class="duplicate-panel-controls">
+                  <div class="duplicate-filter-tabs">
+                    <button
+                      v-for="option in store.duplicatePanelOptions"
+                      :key="option.value"
+                      :class="['btn-sm', store.duplicatePanelSourceResolved === option.value ? 'btn-sm-active' : '']"
+                      @click="store.duplicatePanelSource = option.value"
+                    >
+                      {{ option.label }} ({{ option.count }})
+                    </button>
+                  </div>
+                  <button class="btn-sm" @click="store.showDuplicatePanel = false">收起</button>
+                </div>
               </div>
-              <div v-if="store.duplicateGroups.length === 0" class="duplicate-empty">当前没有检测到重复项</div>
+              <div v-if="store.duplicateGroups.length === 0" class="duplicate-empty">当前分组没有重复项</div>
               <div v-else class="duplicate-groups">
                 <div v-for="group in store.duplicateGroups" :key="group.id" class="duplicate-group">
                   <div class="duplicate-group-title">
@@ -290,9 +284,8 @@
                         <div class="duplicate-row-meta">{{ entry.path }}</div>
                       </div>
                       <div class="duplicate-row-actions">
-                        <button class="btn-sm" @click="store.removeEntryFromList(entry.id)">移除列表</button>
                         <button class="btn-sm" @click="store.toggleSelect(entry.id)">
-                          {{ store.selectedIds.has(entry.id) ? '取消勾选' : '选中' }}
+                          {{ store.selectedIds.has(entry.id) ? '取消' : '勾选' }}
                         </button>
                         <button
                           class="btn-sm btn-sm-danger"
@@ -300,7 +293,7 @@
                           :title="entry.sourceDeleteReason || '删除源文件'"
                           @click="store.requestDeleteSourceEntry(entry.id)"
                         >
-                          删除源文件
+                          删除
                         </button>
                       </div>
                     </div>
@@ -313,7 +306,7 @@
                         <div class="duplicate-row-meta">{{ typeLabel(match.type) }}<span v-if="match.path"> · {{ match.path }}</span></div>
                       </div>
                       <div class="duplicate-row-actions">
-                        <button class="btn-sm btn-sm-danger" @click="store.requestDeleteTavernMatch(match)">删除酒馆资源</button>
+                        <button class="btn-sm btn-sm-danger" title="删除酒馆资源" @click="store.requestDeleteTavernMatch(match)">删除</button>
                       </div>
                     </div>
                   </div>
@@ -341,140 +334,124 @@
                       → {{ item.recognizedName }}
                     </span>
                   </div>
-                  <div class="item-meta">
-                    <template v-if="item.type === 'extension_url'">
-                      <span class="item-type">{{ typeLabel(item.type) }}</span>
-                      <span
-                        v-if="store.isImportMode && (item.urls?.length || 0) > 1"
-                        class="item-url"
-                        :title="(item.urls || []).join('\\n')"
-                      >
-                        URL×{{ item.urls?.length }}
-                      </span>
-                      <span
-                        v-else-if="store.isExportMode"
-                        class="item-url"
-                        title="导出时会自动读取扩展远程URL并写入拓展.txt"
-                      >
-                        拓展.txt
-                      </span>
-                    </template>
-                    <template v-else>
-                      <template v-if="store.isImportMode">
-                        <select
-                          v-model="item.type"
-                          class="item-type-select"
-                          :title="typeLabel(item.type)"
-                          @change="store.refreshEntryAnalysis(item.id)"
+                  <div class="item-secondary-row">
+                    <div class="item-meta">
+                      <template v-if="item.type === 'extension_url'">
+                        <span class="item-type">{{ typeLabel(item.type) }}</span>
+                        <span
+                          v-if="store.isImportMode && (item.urls?.length || 0) > 1"
+                          class="item-url"
+                          :title="(item.urls || []).join('\\n')"
                         >
-                          <option value="unknown">无法识别</option>
-                          <option value="auto_json">自动识别(JSON)</option>
-                          <option value="preset">预设</option>
-                          <option value="worldbook">世界书</option>
-                          <option value="character">角色卡</option>
-                          <option value="regex">正则</option>
-                          <option value="chat">聊天</option>
-                          <option value="script">脚本</option>
-                          <option value="theme">美化</option>
-                          <option value="background">背景图</option>
-                        </select>
+                          URL×{{ item.urls?.length }}
+                        </span>
+                        <span
+                          v-else-if="store.isExportMode"
+                          class="item-url"
+                          title="导出时会自动读取扩展远程URL并写入拓展.txt"
+                        >
+                          拓展.txt
+                        </span>
                       </template>
                       <template v-else>
-                        <span class="item-type">{{ typeLabel(item.type) }}</span>
+                        <span
+                          :class="['item-type', { 'item-type-unknown': item.type === 'unknown' || !item.type }]"
+                          :title="store.isImportMode ? '根据所在文件夹自动识别类型' : typeLabel(item.type)"
+                        >
+                          {{ typeLabel(item.type) }}
+                        </span>
                       </template>
-                    </template>
-                    <span v-if="item.path" class="item-path" :title="item.path">{{ item.path }}</span>
-                    <span
-                      v-if="item.duplicateSource && item.duplicateSource !== 'none'"
-                      class="item-badge item-badge-duplicate"
-                      :title="item.duplicateReason"
-                    >
-                      {{ duplicateSourceLabel(item.duplicateSource) }}
-                    </span>
-                    <span
-                      v-for="warning in item.warnings || []"
-                      :key="warning"
-                      class="item-badge item-badge-warning"
-                      :title="warning"
-                    >
-                      预警
-                    </span>
-                    <span
-                      v-if="store.isExportMode && item.type === 'extension_url'"
-                      :class="['item-url', { 'item-url-muted': !item.url || store.extensionUrlLoadingIds.has(item.id) }]"
-                      :title="item.url || '尚未获取到扩展URL'"
-                    >
-                      {{
-                        store.extensionUrlLoadingIds.has(item.id)
-                          ? 'URL获取中…'
-                          : item.url
-                            ? 'URL已获取'
-                            : 'URL缺失'
-                      }}
-                    </span>
-                    <span v-if="store.isImportMode && item.url && item.type === 'extension_url'" class="item-url" :title="item.url">URL</span>
+                      <span v-if="item.path" class="item-path" :title="item.path">{{ item.path }}</span>
+                      <span
+                        v-if="item.duplicateSource && item.duplicateSource !== 'none'"
+                        class="item-badge item-badge-duplicate"
+                        :title="item.duplicateReason"
+                      >
+                        {{ duplicateSourceLabel(item.duplicateSource) }}
+                      </span>
+                      <span
+                        v-for="warning in item.warnings || []"
+                        :key="warning"
+                        class="item-badge item-badge-warning"
+                        :title="warning"
+                      >
+                        预警
+                      </span>
+                      <span
+                        v-if="store.isExportMode && item.type === 'extension_url'"
+                        :class="['item-url', { 'item-url-muted': !item.url || store.extensionUrlLoadingIds.has(item.id) }]"
+                        :title="item.url || '尚未获取到扩展URL'"
+                      >
+                        {{
+                          store.extensionUrlLoadingIds.has(item.id)
+                            ? 'URL获取中…'
+                            : item.url
+                              ? 'URL已获取'
+                              : 'URL缺失'
+                        }}
+                      </span>
+                      <span v-if="store.isImportMode && item.url && item.type === 'extension_url'" class="item-url" :title="item.url">URL</span>
+                    </div>
+                    <div class="item-actions">
+                      <template v-if="item.type === 'extension_url' && store.isImportMode">
+                        <button
+                          v-if="(item.urls?.length || 0) <= 1"
+                          class="btn-action btn-copy"
+                          @click="copyUrl(item, 'all')"
+                        >复制URL</button>
+                        <template v-else>
+                          <button class="btn-action btn-copy" @click="copyUrl(item, 0)">
+                            复制{{ urlTag(item, 0) }}
+                          </button>
+                          <button class="btn-action btn-copy" @click="copyUrl(item, 1)">
+                            复制{{ urlTag(item, 1) }}
+                          </button>
+                          <button class="btn-action btn-copy btn-copy-all" @click="copyUrl(item, 'all')">复制全部</button>
+                        </template>
+                      </template>
+                      <template v-if="store.isExportMode">
+                        <button
+                          class="btn-action btn-import"
+                          :disabled="store.exportLoading"
+                          @click="store.exportSingle(item)"
+                        >
+                          {{ item.status === 'error' ? '重试导出' : item.type === 'extension_url' ? '写入拓展.txt' : '导出' }}
+                        </button>
+                        <button class="btn-action btn-danger" title="删除酒馆资源" @click="store.deleteTavernForEntry(item)">删除</button>
+                      </template>
+                      <template v-else-if="canImport(item)">
+                        <button class="btn-action btn-import" @click="store.importSingle(item)">
+                          {{ item.status === 'error' ? '重试' : item.type === 'theme' ? '安装' : '导入' }}
+                        </button>
+                      </template>
+                      <span
+                        v-else-if="!item.existsInFolder"
+                        class="file-missing"
+                        title="文件未在所选文件夹中找到"
+                      >文件缺失</span>
+                      <span
+                        v-else-if="item.status !== 'success' && (item.type === 'unknown' || !item.type)"
+                        class="file-missing"
+                        title="无法根据所在文件夹识别资源类型"
+                      >无法识别</span>
+                      <button
+                        v-if="store.isImportMode"
+                        class="btn-action btn-danger"
+                        :disabled="!item.canDeleteSourceFile"
+                        :title="item.sourceDeleteReason || '删除源文件'"
+                        @click="store.requestDeleteSourceEntry(item.id)"
+                      >
+                        删除
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div class="item-status-area">
+                <div v-if="item.status !== 'pending'" class="item-status-area">
                   <span v-if="item.status === 'success'" class="status-success" title="导入成功">✓</span>
                   <span v-else-if="item.status === 'error'" class="status-error" :title="item.errorMessage">✗</span>
                   <span v-else-if="item.status === 'skipped'" class="status-skipped" :title="item.errorMessage">⏭</span>
-                  <span v-else class="status-pending">–</span>
                 </div>
                 <div v-if="item.errorMessage" class="item-error-msg">{{ item.errorMessage }}</div>
-                <div class="item-actions">
-                  <template v-if="item.type === 'extension_url' && store.isImportMode">
-                    <button
-                      v-if="(item.urls?.length || 0) <= 1"
-                      class="btn-action btn-copy"
-                      @click="copyUrl(item, 'all')"
-                    >复制URL</button>
-                    <template v-else>
-                      <button class="btn-action btn-copy" @click="copyUrl(item, 0)">
-                        复制{{ urlTag(item, 0) }}
-                      </button>
-                      <button class="btn-action btn-copy" @click="copyUrl(item, 1)">
-                        复制{{ urlTag(item, 1) }}
-                      </button>
-                      <button class="btn-action btn-copy btn-copy-all" @click="copyUrl(item, 'all')">复制全部</button>
-                    </template>
-                  </template>
-                  <template v-if="store.isExportMode">
-                    <button
-                      class="btn-action btn-import"
-                      :disabled="store.exportLoading"
-                      @click="store.exportSingle(item)"
-                    >
-                      {{ item.status === 'error' ? '重试导出' : item.type === 'extension_url' ? '写入拓展.txt' : '导出' }}
-                    </button>
-                    <button class="btn-action btn-danger" @click="store.deleteTavernForEntry(item)">删除酒馆资源</button>
-                  </template>
-                  <template v-else-if="canImport(item)">
-                    <button class="btn-action btn-import" @click="store.importSingle(item)">
-                      {{ item.status === 'error' ? '重试' : item.type === 'theme' ? '安装' : '导入' }}
-                    </button>
-                  </template>
-                  <span
-                    v-else-if="!item.existsInFolder"
-                    class="file-missing"
-                    title="文件未在所选文件夹中找到"
-                  >文件缺失</span>
-                  <span
-                    v-else-if="item.status !== 'success' && (item.type === 'unknown' || !item.type)"
-                    class="file-missing"
-                    title="请先选择资源类型"
-                  >无法识别</span>
-                  <button class="btn-action btn-muted" @click="store.removeEntryFromList(item.id)">移除列表</button>
-                  <button
-                    v-if="store.isImportMode"
-                    class="btn-action btn-danger"
-                    :disabled="!item.canDeleteSourceFile"
-                    :title="item.sourceDeleteReason || '删除源文件'"
-                    @click="store.requestDeleteSourceEntry(item.id)"
-                  >
-                    删除源文件
-                  </button>
-                </div>
               </div>
               <div v-if="store.filteredEntries.length === 0" class="empty-state">
                 <p>没有匹配的条目</p>
@@ -511,7 +488,6 @@
                     全部导入
                   </button>
                 </template>
-                <button class="btn-sm" :disabled="store.selectedIds.size === 0" @click="store.removeSelectedFromList()">移除选中</button>
                 <button
                   v-if="store.isImportMode"
                   class="btn-sm btn-sm-danger"
@@ -631,7 +607,6 @@ import { categorizeType, getTypeLabel } from './types';
 
 const emit = defineEmits<{ close: [] }>();
 const store = useImportStore();
-const bulkType = ref('');
 const sidebarOpen = ref(false);
 
 function handleClose() {
@@ -673,12 +648,6 @@ function canImport(item: { status: string; type: string; existsInFolder: boolean
   if (item.type === 'resource' || categorizeType(item.type) === 'resource') return false;
   if (categorizeType(item.type) === 'unsupported') return false;
   return item.existsInFolder || !!item.url;
-}
-
-function applyBulkType() {
-  if (!bulkType.value) return;
-  store.setTypeForSelection(bulkType.value);
-  bulkType.value = '';
 }
 
 function deleteCharacterTarget(deleteChats: boolean) {
@@ -1244,6 +1213,9 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
 .item-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .item-name {
   font-weight: 600;
@@ -1256,6 +1228,13 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
   color: #2563eb;
   font-weight: 500;
 }
+.item-secondary-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
 .item-meta {
   display: flex;
   gap: 8px;
@@ -1263,11 +1242,17 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
   color: #6b7280;
   margin-top: 1px;
   flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .item-type {
   background: #e5e7eb;
   padding: 0 5px;
   border-radius: 3px;
+}
+.item-type-unknown {
+  background: #fee2e2;
+  color: #b91c1c;
 }
 .item-badge {
   padding: 0 6px;
@@ -1282,15 +1267,6 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
 .item-badge-warning {
   background: #fee2e2;
   color: #b91c1c;
-}
-.item-type-select {
-  max-width: 130px;
-  padding: 2px 6px;
-  font-size: 11px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  background: #fff;
-  color: #374151;
 }
 .item-path, .item-url {
   max-width: 180px;
@@ -1322,9 +1298,13 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
 
 .item-actions {
   flex-shrink: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
 }
 .btn-action {
-  padding: 4px 12px;
+  padding: 4px 10px;
   border: none;
   border-radius: 4px;
   font-size: 12px;
@@ -1471,15 +1451,37 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
 }
 
 .duplicate-panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  max-height: min(42vh, 420px);
   border-bottom: 1px solid #e5e7eb;
   background: #fffaf0;
   padding: 10px 14px;
+  overflow: hidden;
 }
 .duplicate-panel-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+.duplicate-panel-title {
+  min-width: 0;
+}
+.duplicate-panel-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.duplicate-filter-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .duplicate-panel-subtitle {
   display: block;
@@ -1495,8 +1497,12 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
 .duplicate-groups {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   gap: 10px;
   margin-top: 10px;
+  overflow-y: auto;
+  padding-right: 2px;
 }
 .duplicate-group {
   border: 1px solid #fed7aa;
@@ -1659,6 +1665,101 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
   background: #b91c1c;
 }
 
+@media (max-width: 768px) {
+  .duplicate-panel {
+    max-height: 48vh;
+  }
+  .duplicate-panel-header {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .duplicate-panel-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .duplicate-filter-tabs {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .toolbar {
+    align-items: stretch;
+    gap: 8px;
+  }
+  .search-box {
+    flex: 1 1 calc(100% - 42px);
+    min-width: 0;
+  }
+  .toolbar-actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .toolbar-actions .bulk-type,
+  .toolbar-actions .btn-sm {
+    width: 100%;
+    padding: 6px 8px;
+  }
+  .conflict-row {
+    flex-wrap: wrap;
+  }
+  .item-card {
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px;
+  }
+  .item-info {
+    flex: 1 1 calc(100% - 34px);
+  }
+  .item-name {
+    white-space: normal;
+    word-break: break-all;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+  .item-secondary-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+  .item-meta {
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow: hidden;
+  }
+  .item-path, .item-url {
+    max-width: none;
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  .item-status-area {
+    width: auto;
+    margin-left: auto;
+  }
+  .item-error-msg {
+    padding-left: 0;
+  }
+  .item-actions {
+    width: auto;
+  }
+  .btn-action {
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .bottom-left, .bottom-right {
+    width: 100%;
+  }
+  .duplicate-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .duplicate-row-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 640px) {
   .panel {
     width: 100vw;
@@ -1671,7 +1772,7 @@ async function copyUrl(item: { url?: string; urls?: string[]; urlTags?: string[]
     width: 130px;
   }
   .item-path, .item-url {
-    max-width: 100px;
+    max-width: none;
   }
 }
 </style>
