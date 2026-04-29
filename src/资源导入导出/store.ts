@@ -227,7 +227,27 @@ function looksLikeRegex(data: unknown) {
   return false;
 }
 
+function looksLikePresetPrompt(value: unknown) {
+  return isPlainObject(value) && objHasAnyKey(value, ['id', 'name', 'enabled']);
+}
+
+function looksLikeHelperPreset(data: unknown): data is Preset {
+  if (!isPlainObject(data)) return false;
+
+  const settings = (data as Record<string, unknown>).settings;
+  const prompts = (data as Record<string, unknown>).prompts;
+  const promptsUnused = (data as Record<string, unknown>).prompts_unused;
+  if (!isPlainObject(settings) || !Array.isArray(prompts) || !Array.isArray(promptsUnused)) return false;
+
+  return (
+    objHasAnyKey(settings, ['temperature', 'top_p', 'top_k', 'min_p', 'max_context', 'max_completion_tokens', 'should_stream']) &&
+    prompts.every(looksLikePresetPrompt) &&
+    promptsUnused.every(looksLikePresetPrompt)
+  );
+}
+
 function looksLikePreset(data: unknown) {
+  if (looksLikeHelperPreset(data)) return true;
   if (!isPlainObject(data)) return false;
   return objHasAnyKey(data, [
     'temperature',
@@ -275,6 +295,25 @@ async function resolveAutoJsonType(file: File): Promise<string> {
   } catch {
     return 'unknown';
   }
+}
+
+async function importPresetFromText(importName: string, text: string) {
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    if (looksLikeHelperPreset(parsed)) {
+      if (importName === 'in_use') {
+        await replacePreset('in_use', parsed, { render: 'immediate' });
+      } else {
+        await createOrReplacePreset(importName, parsed);
+      }
+      return;
+    }
+  } catch {
+    // 非 JSON 或旧版原始预设格式，回退到酒馆原生导入
+  }
+
+  const ok = await importRawPreset(importName, text);
+  if (!ok) throw new Error('导入预设返回失败');
 }
 
 function upsertParentStyleTag(name: string, css: string) {
@@ -2760,8 +2799,7 @@ export const useImportStore = defineStore('resource-importer', () => {
         const text = await item.file.text();
         switch (item.type) {
           case 'preset': {
-            const r = await importRawPreset(importName, text);
-            if (!r) throw new Error('导入预设返回失败');
+            await importPresetFromText(importName, text);
             break;
           }
           case 'worldbook': {

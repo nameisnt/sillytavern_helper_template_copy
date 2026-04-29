@@ -34,6 +34,12 @@ export default [
         entryPoint: 'tailwind.css',
         tailwindConfig: 'tailwind.config.js',
       },
+      'import-x/resolver': {
+        node: {
+          extensions: ['.js', '.jsx', '.ts', '.tsx', '.vue'],
+        },
+        typescript: true,
+      },
     },
   },
   {
