@@ -383,7 +383,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, toRaw } from 'vue';
 
 type ManagerApi = {
   readData: () => any;
@@ -426,10 +426,11 @@ const statusOptions = [
 ] as const;
 
 function cloneDraft<T>(value: T): T {
+  const rawValue = typeof value === 'object' && value !== null ? toRaw(value) : value;
   if (typeof structuredClone === 'function') {
-    return structuredClone(value);
+    return structuredClone(rawValue);
   }
-  return JSON.parse(JSON.stringify(value)) as T;
+  return JSON.parse(JSON.stringify(rawValue)) as T;
 }
 
 const currentView = ref<(typeof navEntries)[number]['id']>('home');
@@ -477,13 +478,19 @@ function reloadDraft() {
 }
 
 function saveAll() {
-  syncCurrentId();
-  const normalized = props.api.saveData(cloneDraft(draft.value));
-  draft.value = cloneDraft(normalized);
-  currentId.value = draft.value.activeId || draft.value.order?.[0] || '';
-  props.api.renderBalls();
-  setClean('已保存并刷新悬浮球');
-  props.api.showToast('success', '悬浮球管理已保存');
+  try {
+    syncCurrentId();
+    const normalized = props.api.saveData(cloneDraft(draft.value));
+    draft.value = cloneDraft(normalized);
+    currentId.value = draft.value.activeId || draft.value.order?.[0] || '';
+    props.api.renderBalls();
+    setClean('已保存并刷新悬浮球');
+    props.api.showToast('success', '悬浮球管理已保存');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    statusMessage.value = `保存失败：${message}`;
+    props.api.showToast('error', `悬浮球保存失败：${message}`);
+  }
 }
 
 function addBall() {
