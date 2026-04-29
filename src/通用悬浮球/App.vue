@@ -12,7 +12,6 @@
       <div class="ufb-topbar__actions">
         <button class="ufb-btn ufb-btn--ghost" type="button" @click="reloadDraft">重载</button>
         <button class="ufb-btn ufb-btn--primary" type="button" @click="saveAll">{{ dirty ? '保存变更' : '重新保存' }}</button>
-        <button class="ufb-btn" type="button" @click="props.onClose">关闭</button>
       </div>
     </header>
 
@@ -27,24 +26,13 @@
           @click="currentView = entry.id"
         >
           <span class="ufb-nav__title">{{ entry.title }}</span>
-          <span class="ufb-nav__desc">{{ entry.description }}</span>
         </button>
       </aside>
 
       <main class="ufb-main">
-        <section v-if="currentView === 'home'" class="ufb-home">
-          <button v-for="entry in navEntries.slice(1)" :key="entry.id" class="ufb-card" type="button" @click="currentView = entry.id">
-            <strong>{{ entry.title }}</strong>
-            <p>{{ entry.description }}</p>
-          </button>
-        </section>
-
-        <section v-else-if="currentView === 'content'" class="ufb-section">
+        <section v-if="currentView === 'content'" class="ufb-section">
           <div class="ufb-section__head">
-            <div>
-              <h2>网页代码</h2>
-              <p>管理多球、名称、状态和自定义网页代码。</p>
-            </div>
+            <h2>网页代码</h2>
             <div class="ufb-inline-actions">
               <button class="ufb-btn ufb-btn--primary" type="button" @click="addBall">新建悬浮球</button>
               <button class="ufb-btn ufb-btn--danger" type="button" :disabled="orderedItems.length <= 1" @click="deleteCurrentBall">
@@ -98,7 +86,7 @@
                 <textarea
                   :value="currentItem.webCode"
                   class="ufb-textarea ufb-textarea--grow"
-                  placeholder="在这里输入当前悬浮球对应的 HTML 代码..."
+                  placeholder="输入 HTML"
                   @input="updateCurrentWebCode(($event.target as HTMLTextAreaElement).value)"
                 />
               </label>
@@ -108,10 +96,7 @@
 
         <section v-else-if="currentView === 'appearance'" class="ufb-section">
           <div class="ufb-section__head">
-            <div>
-              <h2>悬浮球设置</h2>
-              <p>调整图标、文字、颜色、大小和默认位置。</p>
-            </div>
+            <h2>悬浮球设置</h2>
           </div>
 
           <div v-if="currentItem" class="ufb-form">
@@ -154,7 +139,7 @@
                 :value="currentItem.floatingBall.text"
                 type="text"
                 class="ufb-input"
-                placeholder="留空则不显示文字"
+                placeholder="可留空"
                 @input="updateCurrentText(($event.target as HTMLInputElement).value)"
               />
             </label>
@@ -165,7 +150,7 @@
                 :value="currentItem.floatingBall.icon"
                 type="text"
                 class="ufb-input"
-                placeholder="例如：🌐 或 ★"
+                placeholder="可留空"
                 @input="updateCurrentIcon(($event.target as HTMLInputElement).value)"
               />
             </label>
@@ -217,10 +202,7 @@
 
         <section v-else-if="currentView === 'rules'" class="ufb-section">
           <div class="ufb-section__head">
-            <div>
-              <h2>消息来源与规则</h2>
-              <p>切换内容来源，并为消息层模式配置规则链和即时预览。</p>
-            </div>
+            <h2>消息来源与规则</h2>
           </div>
 
           <div class="ufb-rules">
@@ -256,10 +238,6 @@
                 </div>
               </div>
 
-              <p v-if="currentItem?.contentSource.mode === 'custom_html'" class="ufb-hint">
-                当前球继续使用“网页代码”页里的 webCode 进行预览。切到“消息层规则”后，下面的规则链才会生效。
-              </p>
-
               <template v-if="messageSource">
                 <label class="ufb-field">
                   <span>目标楼层</span>
@@ -286,27 +264,62 @@
                     新增规则
                   </button>
                 </div>
-
-                <div v-if="messageSource.rules.length === 0" class="ufb-empty">
-                  当前还没有规则。你可以先新增一条提取规则，从目标楼层里抓取网页片段、文本或 URL。
+                <div class="ufb-import-panel">
+                  <div class="ufb-inline-actions">
+                    <button class="ufb-btn" type="button" :disabled="tavernRegexOptions.length === 0" @click="selectAllTavernRegexes">全选</button>
+                    <button class="ufb-btn" type="button" :disabled="selectedTavernRegexIds.length === 0" @click="clearSelectedTavernRegexes">清空</button>
+                    <button class="ufb-btn" type="button" :disabled="selectedTavernRegexIds.length === 0" @click="importTavernRegex">
+                      导入 {{ selectedTavernRegexIds.length || '' }}
+                    </button>
+                  </div>
+                  <div v-if="tavernRegexOptions.length === 0" class="ufb-empty">
+                    没有可导入的酒馆正则
+                  </div>
+                  <div v-else class="ufb-import-groups">
+                    <section v-for="group in groupedTavernRegexOptions" :key="group.scope" class="ufb-import-group">
+                      <div class="ufb-import-group__title">{{ group.title }}</div>
+                      <div class="ufb-check-list">
+                        <label v-for="regex in group.items" :key="regex.id" class="ufb-check-item">
+                          <input
+                            type="checkbox"
+                            :checked="isTavernRegexSelected(regex.id)"
+                            @change="toggleTavernRegexSelection(regex.id)"
+                          />
+                          <span>{{ regex.label }}</span>
+                        </label>
+                      </div>
+                    </section>
+                  </div>
                 </div>
 
-                <div v-for="(rule, index) in messageSource.rules" :key="rule.id" class="ufb-rule" :class="{ 'is-disabled': !rule.enabled }">
-                  <div class="ufb-rule__head">
-                    <div>
+                <div v-if="messageSource.rules.length === 0" class="ufb-empty">
+                  暂无规则
+                </div>
+
+                <div
+                  v-for="(rule, index) in messageSource.rules"
+                  :key="rule.id"
+                  class="ufb-rule"
+                  :class="{ 'is-disabled': !rule.enabled, 'is-collapsed': isRuleCollapsed(rule.id) }"
+                >
+                  <div class="ufb-rule__head" :class="{ 'is-collapsed': isRuleCollapsed(rule.id) }">
+                    <div class="ufb-rule__summary">
                       <div class="ufb-rule__title">{{ rule.name?.trim() || `规则 ${Number(index) + 1}` }}</div>
-                      <div class="ufb-rule__meta">{{ props.api.getRuleModeLabel(rule.mode) }} · {{ rule.enabled ? '已启用' : '已停用' }}</div>
+                      <div v-if="!isRuleCollapsed(rule.id)" class="ufb-rule__meta">{{ props.api.getRuleModeLabel(rule.mode) }} · {{ rule.enabled ? '已启用' : '已停用' }}</div>
                     </div>
                     <div class="ufb-inline-actions">
-                      <button class="ufb-btn" type="button" @click="toggleRuleEnabled(Number(index))">{{ rule.enabled ? '停用' : '启用' }}</button>
-                      <button class="ufb-btn" type="button" @click="copyRule(Number(index))">复制</button>
-                      <button class="ufb-btn" type="button" :disabled="Number(index) === 0" @click="moveRule(Number(index), -1)">上移</button>
-                      <button class="ufb-btn" type="button" :disabled="Number(index) >= messageSource.rules.length - 1" @click="moveRule(Number(index), 1)">下移</button>
-                      <button class="ufb-btn ufb-btn--danger" type="button" @click="removeRule(Number(index))">删除</button>
+                      <button class="ufb-btn" type="button" @click="toggleRuleCollapsed(rule.id)">{{ isRuleCollapsed(rule.id) ? '展开' : '收起' }}</button>
+                      <template v-if="!isRuleCollapsed(rule.id)">
+                        <button class="ufb-btn" type="button" @click="toggleRuleEnabled(Number(index))">{{ rule.enabled ? '停用' : '启用' }}</button>
+                        <button class="ufb-btn" type="button" @click="copyRule(Number(index))">复制</button>
+                        <button class="ufb-btn" type="button" :disabled="Number(index) === 0" @click="moveRule(Number(index), -1)">上移</button>
+                        <button class="ufb-btn" type="button" :disabled="Number(index) >= messageSource.rules.length - 1" @click="moveRule(Number(index), 1)">下移</button>
+                        <button class="ufb-btn ufb-btn--danger" type="button" @click="removeRule(Number(index))">删除</button>
+                      </template>
                     </div>
                   </div>
 
-                  <div class="ufb-grid">
+                  <div v-if="!isRuleCollapsed(rule.id)" class="ufb-grid">
                     <label class="ufb-field">
                       <span>名称</span>
                       <input :value="rule.name" type="text" class="ufb-input" @input="updateRuleField(Number(index), 'name', ($event.target as HTMLInputElement).value)" />
@@ -323,7 +336,7 @@
 
                     <label class="ufb-field">
                       <span>Flags</span>
-                      <input :value="rule.flags" type="text" class="ufb-input" placeholder="例如：gi" @input="updateRuleField(Number(index), 'flags', ($event.target as HTMLInputElement).value)" />
+                      <input :value="rule.flags" type="text" class="ufb-input" placeholder="gi" @input="updateRuleField(Number(index), 'flags', ($event.target as HTMLInputElement).value)" />
                     </label>
 
                     <label class="ufb-field ufb-field--span">
@@ -331,7 +344,7 @@
                       <textarea
                         :value="rule.pattern"
                         class="ufb-textarea"
-                        placeholder="输入正则表达式正文，不需要首尾 /"
+                        placeholder="输入正则"
                         @input="updateRuleField(Number(index), 'pattern', ($event.target as HTMLTextAreaElement).value)"
                       />
                     </label>
@@ -341,7 +354,7 @@
                       <textarea
                         :value="rule.replacement"
                         class="ufb-textarea"
-                        placeholder="可留空。提取模式留空时默认输出完整匹配。"
+                        placeholder="可留空"
                         @input="updateRuleField(Number(index), 'replacement', ($event.target as HTMLTextAreaElement).value)"
                       />
                     </label>
@@ -383,7 +396,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, toRaw } from 'vue';
+import { computed, ref, toRaw, watchEffect } from 'vue';
 
 type ManagerApi = {
   readData: () => any;
@@ -397,6 +410,8 @@ type ManagerApi = {
   getRuleModeLabel: (mode: string) => string;
   createBallItem: (partial?: any) => any;
   createRegexRule: (partial?: any) => any;
+  listTavernRegexTemplates: () => any[];
+  createRuleFromTavernRegex: (id: string) => any | null;
   executeMessageRules: (contentSource: any) => any;
   parsePreviewUrl: (value: string) => { ok: boolean; value?: string; error?: string };
   defaultMessageTarget: string;
@@ -413,10 +428,9 @@ const props = defineProps<{
 }>();
 
 const navEntries = [
-  { id: 'home', title: '功能入口', description: '先看当前球概况，再进入具体配置页。' },
-  { id: 'content', title: '网页代码', description: '管理多球、名称、状态和自定义网页代码。' },
-  { id: 'appearance', title: '悬浮球设置', description: '调整图标、颜色、文字、大小和位置。' },
-  { id: 'rules', title: '消息来源与规则', description: '切换内容来源，编辑规则链并查看即时结果。' },
+  { id: 'content', title: '网页代码' },
+  { id: 'appearance', title: '悬浮球设置' },
+  { id: 'rules', title: '消息来源与规则' },
 ] as const;
 
 const statusOptions = [
@@ -433,7 +447,7 @@ function cloneDraft<T>(value: T): T {
   return JSON.parse(JSON.stringify(rawValue)) as T;
 }
 
-const currentView = ref<(typeof navEntries)[number]['id']>('home');
+const currentView = ref<(typeof navEntries)[number]['id']>('content');
 const draft = ref(cloneDraft(props.api.readData()));
 const currentId = ref<string>(draft.value.activeId || draft.value.order?.[0] || '');
 const dirty = ref(false);
@@ -618,6 +632,37 @@ const messageSource = computed(() => {
   return currentItem.value.contentSource;
 });
 
+const tavernRegexOptions = computed(() => props.api.listTavernRegexTemplates());
+const selectedTavernRegexIds = ref<string[]>([]);
+const collapsedRuleIds = ref<string[]>([]);
+const tavernRegexScopeOrder = ['character', 'preset', 'global'] as const;
+
+const groupedTavernRegexOptions = computed(() =>
+  tavernRegexScopeOrder
+    .map(scope => ({
+      scope,
+      title: scope === 'character' ? '局部正则' : scope === 'preset' ? '预设正则' : '全局正则',
+      items: tavernRegexOptions.value.filter(option => option.scope === scope),
+    }))
+    .filter(group => group.items.length > 0),
+);
+
+watchEffect(() => {
+  const validIds = new Set(tavernRegexOptions.value.map(option => option.id));
+  const nextSelectedIds = selectedTavernRegexIds.value.filter(id => validIds.has(id));
+  if (nextSelectedIds.length !== selectedTavernRegexIds.value.length) {
+    selectedTavernRegexIds.value = nextSelectedIds;
+  }
+});
+
+watchEffect(() => {
+  const validRuleIds = new Set((messageSource.value?.rules ?? []).map((rule: any) => rule.id));
+  const nextCollapsedIds = collapsedRuleIds.value.filter(id => validRuleIds.has(id));
+  if (nextCollapsedIds.length !== collapsedRuleIds.value.length) {
+    collapsedRuleIds.value = nextCollapsedIds;
+  }
+});
+
 function updateMessageTarget(value: string) {
   withMessageSource(source => {
     source.messageTarget = value;
@@ -637,6 +682,59 @@ function addRule() {
   withMessageSource(source => {
     source.rules.push(props.api.createRegexRule());
   }, '已新增规则，记得保存');
+}
+
+function importTavernRegex() {
+  if (selectedTavernRegexIds.value.length === 0) {
+    props.api.showToast('warning', '没有可导入的酒馆正则');
+    return;
+  }
+
+  const rules = selectedTavernRegexIds.value
+    .map(id => props.api.createRuleFromTavernRegex(id))
+    .filter((rule): rule is NonNullable<typeof rule> => Boolean(rule));
+
+  if (rules.length === 0) {
+    props.api.showToast('error', '导入酒馆正则失败');
+    return;
+  }
+
+  withMessageSource(source => {
+    source.rules.push(...rules);
+  }, `已导入 ${rules.length} 条酒馆正则`);
+  props.api.showToast('success', `已导入 ${rules.length} 条酒馆正则`);
+}
+
+function isTavernRegexSelected(id: string) {
+  return selectedTavernRegexIds.value.includes(id);
+}
+
+function toggleTavernRegexSelection(id: string) {
+  if (isTavernRegexSelected(id)) {
+    selectedTavernRegexIds.value = selectedTavernRegexIds.value.filter(currentId => currentId !== id);
+    return;
+  }
+  selectedTavernRegexIds.value = [...selectedTavernRegexIds.value, id];
+}
+
+function selectAllTavernRegexes() {
+  selectedTavernRegexIds.value = tavernRegexOptions.value.map(option => option.id);
+}
+
+function clearSelectedTavernRegexes() {
+  selectedTavernRegexIds.value = [];
+}
+
+function isRuleCollapsed(ruleId: string) {
+  return collapsedRuleIds.value.includes(ruleId);
+}
+
+function toggleRuleCollapsed(ruleId: string) {
+  if (isRuleCollapsed(ruleId)) {
+    collapsedRuleIds.value = collapsedRuleIds.value.filter(id => id !== ruleId);
+    return;
+  }
+  collapsedRuleIds.value = [...collapsedRuleIds.value, ruleId];
 }
 
 function moveRule(index: number, offset: number) {
@@ -693,17 +791,15 @@ const previewState = computed(() => {
     return {
       kind: 'placeholder' as const,
       title: '未找到悬浮球',
-      description: '当前没有可编辑的悬浮球配置。',
+      description: '没有可编辑项',
     };
   }
 
   if (item.contentSource?.mode !== 'message_rules') {
     return {
       kind: 'placeholder' as const,
-      title: '当前使用自定义网页',
-      description: item.webCode?.trim()
-        ? '点击悬浮球时会继续走现有 webCode 预览逻辑。切换到“消息层规则”后，这里才会显示规则链处理结果。'
-        : '当前球还没有配置 webCode。切换到“消息层规则”后，这里才会显示规则链处理结果。',
+      title: '当前为自定义网页',
+      description: item.webCode?.trim() ? '规则预览已隐藏' : '未配置网页代码',
     };
   }
 
@@ -720,9 +816,7 @@ const previewState = computed(() => {
     return {
       kind: 'placeholder' as const,
       title: '没有可预览的结果',
-      description:
-        result.warnings?.[0] ??
-        `目标楼层 ${result.messageTarget} 没有产出可用于 ${props.api.getOutputModeLabel(item.contentSource.outputMode)} 预览的结果。`,
+      description: result.warnings?.[0] ?? '暂无结果',
     };
   }
 
@@ -841,30 +935,6 @@ const previewState = computed(() => {
   min-height:0;
   overflow:auto;
   padding:24px;
-}
-.ufb-home{
-  display:grid;
-  grid-template-columns:repeat(3, minmax(0, 1fr));
-  gap:16px;
-}
-.ufb-card{
-  border:none;
-  border-radius:22px;
-  padding:24px;
-  text-align:left;
-  cursor:pointer;
-  color:#e2e8f0;
-  background:rgba(255,255,255,0.05);
-  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.05);
-}
-.ufb-card strong{
-  display:block;
-  font-size:18px;
-}
-.ufb-card p{
-  margin:10px 0 0;
-  color:#bfd3ea;
-  line-height:1.65;
 }
 .ufb-section{
   display:flex;
@@ -1022,6 +1092,55 @@ const previewState = computed(() => {
   align-items:center;
   gap:12px;
 }
+.ufb-import-panel{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.ufb-import-groups{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+.ufb-import-group{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+}
+.ufb-import-group__title{
+  font-size:13px;
+  font-weight:700;
+  color:#dbeafe;
+}
+.ufb-check-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  max-height:240px;
+  overflow:auto;
+  padding:4px;
+  border-radius:16px;
+  background:rgba(2,6,23,0.32);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.04);
+}
+.ufb-check-item{
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+  padding:10px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  color:#e2e8f0;
+  background:rgba(255,255,255,0.03);
+}
+.ufb-check-item input{
+  margin-top:2px;
+  flex:0 0 auto;
+}
+.ufb-check-item span{
+  font-size:13px;
+  line-height:1.5;
+}
 .ufb-range{
   accent-color:#38bdf8;
 }
@@ -1094,6 +1213,13 @@ const previewState = computed(() => {
   gap:12px;
   margin-bottom:12px;
 }
+.ufb-rule__head.is-collapsed{
+  align-items:center;
+  margin-bottom:0;
+}
+.ufb-rule__summary{
+  min-width:0;
+}
 .ufb-rule__title{
   font-size:14px;
   font-weight:700;
@@ -1165,7 +1291,6 @@ const previewState = computed(() => {
     flex-direction:row;
     overflow:auto;
   }
-  .ufb-home,
   .ufb-split,
   .ufb-rules{
     grid-template-columns:1fr;

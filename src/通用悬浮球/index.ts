@@ -28,6 +28,17 @@ type RegexRule = {
   replacement: string;
 };
 
+type TavernRegexTemplate = {
+  id: string;
+  name: string;
+  label: string;
+  scope: 'global' | 'character' | 'preset';
+  enabled: boolean;
+  pattern: string;
+  flags: string;
+  replacement: string;
+};
+
 type FloatingBallContentSource =
   | {
       mode: 'custom_html';
@@ -260,6 +271,77 @@ function createRegexRule(partial?: Partial<RegexRule>): RegexRule {
 
 function normalizeRegexRule(value: unknown): RegexRule {
   return createRegexRule(_.isPlainObject(value) ? (value as Partial<RegexRule>) : {});
+}
+
+function parseStoredRegexPattern(value: string): Pick<TavernRegexTemplate, 'pattern' | 'flags'> {
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^\/([\s\S]*)\/([a-z]*)$/);
+  if (!match) {
+    return {
+      pattern: raw,
+      flags: '',
+    };
+  }
+  return {
+    pattern: match[1] ?? '',
+    flags: match[2] ?? '',
+  };
+}
+
+function getTavernRegexScopeLabel(scope: TavernRegexTemplate['scope']): string {
+  if (scope === 'character') {
+    return '局部';
+  }
+  if (scope === 'preset') {
+    return '预设';
+  }
+  return '全局';
+}
+
+function listTavernRegexTemplates(): TavernRegexTemplate[] {
+  const templates: TavernRegexTemplate[] = [];
+  const appendTemplates = (scope: TavernRegexTemplate['scope'], option: TavernRegexOption) => {
+    try {
+      const regexes = typeof getTavernRegexes === 'function' ? getTavernRegexes(option) : [];
+      for (const [index, regex] of (Array.isArray(regexes) ? regexes : []).entries()) {
+        const name = String(regex?.script_name || '').trim() || `正则 ${index + 1}`;
+        const id = String(regex?.id || '').trim() || `${scope}-${index}`;
+        const parsed = parseStoredRegexPattern(String(regex?.find_regex ?? ''));
+        const scopeLabel = getTavernRegexScopeLabel(scope);
+        templates.push({
+          id: `${scope}:${id}`,
+          name: `[${scopeLabel}] ${name}`,
+          label: `${scopeLabel} · ${name}${regex?.enabled === false ? ' · 已停用' : ''}`,
+          scope,
+          enabled: regex?.enabled !== false,
+          pattern: parsed.pattern,
+          flags: parsed.flags,
+          replacement: String(regex?.replace_string ?? ''),
+        });
+      }
+    } catch (error) {
+      console.warn(`[${SCRIPT_NAME}] list tavern regexes failed (${scope})`, error);
+    }
+  };
+
+  appendTemplates('global', { type: 'global' });
+  appendTemplates('character', { type: 'character', name: 'current' });
+  appendTemplates('preset', { type: 'preset', name: 'in_use' });
+  return templates;
+}
+
+function createRuleFromTavernRegex(templateId: string): RegexRule | null {
+  const template = listTavernRegexTemplates().find(item => item.id === templateId);
+  if (!template) {
+    return null;
+  }
+  return createRegexRule({
+    name: template.name,
+    mode: 'replace',
+    pattern: template.pattern,
+    flags: template.flags,
+    replacement: template.replacement,
+  });
 }
 
 function createDefaultMessageRulesSource(): Extract<FloatingBallContentSource, { mode: 'message_rules' }> {
@@ -1632,7 +1714,7 @@ class UniversalFloatingBallApp {
 .th-ufb-preview-card{
   border-radius:16px;
   border:0.5px solid rgba(255,255,255,0.1);
-  background:rgba(11,15,25,0.78);
+  background:rgba(7,10,18,0.9);
   overflow:hidden;
 }
 .th-ufb-preview-placeholder{
@@ -2011,6 +2093,8 @@ class UniversalFloatingBallApp {
       getRuleModeLabel,
       createBallItem,
       createRegexRule,
+      listTavernRegexTemplates,
+      createRuleFromTavernRegex,
       executeMessageRules,
       parsePreviewUrl,
       defaultMessageTarget: DEFAULT_MESSAGE_TARGET,
@@ -3373,7 +3457,10 @@ class UniversalFloatingBallApp {
     iframe.setAttribute('frameborder', '0');
     iframe.setAttribute('srcdoc', previewHtml);
     iframe.style.height = '60svh';
-    modal.body.append(iframe);
+    const contentCard = this.hostDocument.createElement('div');
+    contentCard.className = 'th-ufb-preview-card';
+    contentCard.append(iframe);
+    modal.body.append(contentCard);
 
     cleanupIframeControls = this.attachIframePreviewControls(modal, iframe, { enableBridgeSizing: true });
   }
