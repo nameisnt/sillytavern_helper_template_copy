@@ -3,15 +3,15 @@
     <header class="ufb-topbar">
       <div>
         <p class="ufb-topbar__eyebrow">通用悬浮球</p>
-        <h1>悬浮球管理</h1>
         <p class="ufb-topbar__status" :class="{ 'is-dirty': dirty }">
           <span class="ufb-status-dot" />
           {{ dirty ? '有未保存改动' : '已保存' }} · {{ statusMessage }}
         </p>
       </div>
       <div class="ufb-topbar__actions">
-        <button class="ufb-btn ufb-btn--ghost" type="button" @click="reloadDraft">重载</button>
-        <button class="ufb-btn ufb-btn--primary" type="button" @click="saveAll">{{ dirty ? '保存变更' : '重新保存' }}</button>
+        <button class="ufb-icon-btn ufb-icon-btn--ghost" type="button" title="重载" aria-label="重载" @click="reloadDraft">↻</button>
+        <button class="ufb-icon-btn ufb-icon-btn--primary" type="button" :title="dirty ? '保存变更' : '重新保存'" :aria-label="dirty ? '保存变更' : '重新保存'" @click="saveAll">✓</button>
+        <button class="ufb-icon-btn ufb-icon-btn--danger" type="button" title="关闭" aria-label="关闭" @click="props.onClose">✕</button>
       </div>
     </header>
 
@@ -31,80 +31,61 @@
 
       <main class="ufb-main">
         <section v-if="currentView === 'content'" class="ufb-section">
-          <div class="ufb-section__head">
-            <h2>网页代码</h2>
+          <div class="ufb-section__head ufb-section__head--toolbar">
+            <select v-model="currentId" class="ufb-input ufb-toolbar-select">
+              <option v-for="item in orderedItems" :key="item.id" :value="item.id">
+                {{ formatBallOptionLabel(item) }}
+              </option>
+            </select>
             <div class="ufb-inline-actions">
-              <button class="ufb-btn ufb-btn--primary" type="button" @click="addBall">新建悬浮球</button>
+              <button class="ufb-btn ufb-btn--primary" type="button" @click="addBall">新建</button>
               <button class="ufb-btn ufb-btn--danger" type="button" :disabled="orderedItems.length <= 1" @click="deleteCurrentBall">
-                删除当前球
+                删除当前
               </button>
             </div>
           </div>
 
-          <div class="ufb-split">
-            <div class="ufb-ball-list">
+          <div v-if="currentItem" class="ufb-form">
+            <label class="ufb-field">
+              <span>名称</span>
+              <input :value="currentItem.name" type="text" class="ufb-input" placeholder="悬浮球名称" @input="updateCurrentName(($event.target as HTMLInputElement).value)" />
+            </label>
+
+            <div class="ufb-field">
+              <span>启用</span>
               <button
-                v-for="item in orderedItems"
-                :key="item.id"
-                class="ufb-ball-item"
-                :class="{ 'is-active': item.id === currentId }"
+                class="ufb-switch"
+                :class="{ 'is-on': currentItem.status === 'active' }"
                 type="button"
-                @click="currentId = item.id"
+                :aria-pressed="currentItem.status === 'active'"
+                @click="updateCurrentEnabled(currentItem.status !== 'active')"
               >
-                <div class="ufb-ball-item__title">{{ item.name?.trim() || '未命名悬浮球' }}</div>
-                <div class="ufb-ball-item__meta">
-                  <span class="ufb-badge">{{ props.api.getStatusLabel(item.status) }}</span>
-                  <span>{{ getContentSummary(item) }}</span>
-                </div>
+                <span class="ufb-switch__track">
+                  <span class="ufb-switch__thumb" />
+                </span>
+                <span class="ufb-switch__text">{{ currentItem.status === 'active' ? '启用' : '停用' }}</span>
               </button>
             </div>
 
-            <div v-if="currentItem" class="ufb-form">
-              <label class="ufb-field">
-                <span>名称</span>
-                <input :value="currentItem.name" type="text" class="ufb-input" placeholder="悬浮球名称" @input="updateCurrentName(($event.target as HTMLInputElement).value)" />
-              </label>
-
-              <div class="ufb-field">
-                <span>状态</span>
-                <div class="ufb-inline-actions">
-                  <button
-                    v-for="status in statusOptions"
-                    :key="status.value"
-                    class="ufb-btn"
-                    :class="{ 'ufb-btn--primary': currentItem.status === status.value }"
-                    type="button"
-                    @click="updateCurrentStatus(status.value)"
-                  >
-                    {{ status.label }}
-                  </button>
-                </div>
-              </div>
-
-              <label class="ufb-field">
-                <span>网页代码</span>
-                <textarea
-                  :value="currentItem.webCode"
-                  class="ufb-textarea ufb-textarea--grow"
-                  placeholder="输入 HTML"
-                  @input="updateCurrentWebCode(($event.target as HTMLTextAreaElement).value)"
-                />
-              </label>
-            </div>
+            <label class="ufb-field ufb-field--stack">
+              <span>网页代码</span>
+              <textarea
+                :value="currentItem.webCode"
+                class="ufb-textarea ufb-textarea--grow"
+                placeholder="输入 HTML"
+                @input="updateCurrentWebCode(($event.target as HTMLTextAreaElement).value)"
+              />
+            </label>
           </div>
         </section>
 
         <section v-else-if="currentView === 'appearance'" class="ufb-section">
-          <div class="ufb-section__head">
-            <h2>悬浮球设置</h2>
-          </div>
-
           <div v-if="currentItem" class="ufb-form">
             <label class="ufb-field">
               <span>当前悬浮球</span>
               <select v-model="currentId" class="ufb-input">
                 <option v-for="item in orderedItems" :key="item.id" :value="item.id">
-                  {{ item.name?.trim() || '未命名悬浮球' }} · {{ props.api.getStatusLabel(item.status) }}
+                  {{ formatBallOptionLabel(item) }}
                 </option>
               </select>
             </label>
@@ -155,17 +136,20 @@
               />
             </label>
 
-            <div class="ufb-presets">
-              <button
-                v-for="icon in props.api.defaultIconPresets"
-                :key="icon"
-                class="ufb-chip"
-                :class="{ 'is-active': currentItem.floatingBall.icon === icon }"
-                type="button"
-                @click="updateCurrentIcon(icon)"
-              >
-                {{ icon }}
-              </button>
+            <div class="ufb-field">
+              <span>图标预设</span>
+              <div class="ufb-presets">
+                <button
+                  v-for="icon in props.api.defaultIconPresets"
+                  :key="icon"
+                  class="ufb-chip"
+                  :class="{ 'is-active': currentItem.floatingBall.icon === icon }"
+                  type="button"
+                  @click="updateCurrentIcon(icon)"
+                >
+                  {{ icon }}
+                </button>
+              </div>
             </div>
 
             <label class="ufb-field">
@@ -182,36 +166,38 @@
               </div>
             </label>
 
-            <div class="ufb-presets">
-              <button
-                v-for="color in props.api.defaultColorPresets"
-                :key="color"
-                class="ufb-chip ufb-chip--color"
-                :class="{ 'is-active': currentItem.floatingBall.color?.toLowerCase() === color.toLowerCase() }"
-                :style="{ '--chip-color': color }"
-                type="button"
-                @click="updateCurrentColor(color)"
-              />
+            <div class="ufb-field">
+              <span>颜色预设</span>
+              <div class="ufb-presets">
+                <button
+                  v-for="color in props.api.defaultColorPresets"
+                  :key="color"
+                  class="ufb-chip ufb-chip--color"
+                  :class="{ 'is-active': currentItem.floatingBall.color?.toLowerCase() === color.toLowerCase() }"
+                  :style="{ '--chip-color': color }"
+                  type="button"
+                  @click="updateCurrentColor(color)"
+                />
+              </div>
             </div>
 
-            <div class="ufb-inline-actions">
-              <button class="ufb-btn" type="button" @click="resetCurrentPosition">重置位置</button>
+            <div class="ufb-field">
+              <span>位置</span>
+              <div class="ufb-inline-actions">
+                <button class="ufb-btn" type="button" @click="resetCurrentPosition">重置</button>
+              </div>
             </div>
           </div>
         </section>
 
-        <section v-else-if="currentView === 'rules'" class="ufb-section">
-          <div class="ufb-section__head">
-            <h2>消息来源与规则</h2>
-          </div>
-
+        <section v-else-if="currentView === 'rules'" class="ufb-section ufb-section--rules">
           <div class="ufb-rules">
             <div class="ufb-rules__main">
               <label class="ufb-field">
                 <span>当前悬浮球</span>
                 <select v-model="currentId" class="ufb-input">
                   <option v-for="item in orderedItems" :key="item.id" :value="item.id">
-                    {{ item.name?.trim() || '未命名悬浮球' }} · {{ props.api.getStatusLabel(item.status) }}
+                    {{ formatBallOptionLabel(item) }}
                   </option>
                 </select>
               </label>
@@ -250,15 +236,6 @@
                   />
                 </label>
 
-                <label class="ufb-field">
-                  <span>输出模式</span>
-                  <select :value="messageSource.outputMode" class="ufb-input" @change="updateOutputMode(($event.target as HTMLSelectElement).value)">
-                    <option value="html">HTML</option>
-                    <option value="text">文本</option>
-                    <option value="url">URL</option>
-                  </select>
-                </label>
-
                 <div class="ufb-inline-actions">
                   <button class="ufb-btn ufb-btn--primary" type="button" @click="addRule">
                     新增规则
@@ -277,8 +254,11 @@
                   </div>
                   <div v-else class="ufb-import-groups">
                     <section v-for="group in groupedTavernRegexOptions" :key="group.scope" class="ufb-import-group">
-                      <div class="ufb-import-group__title">{{ group.title }}</div>
-                      <div class="ufb-check-list">
+                      <button class="ufb-import-group__head" type="button" @click="toggleImportGroupCollapsed(group.scope)">
+                        <span class="ufb-import-group__title">{{ group.title }}</span>
+                        <span class="ufb-import-group__toggle">{{ isImportGroupCollapsed(group.scope) ? '展开' : '收起' }}</span>
+                      </button>
+                      <div v-if="!isImportGroupCollapsed(group.scope)" class="ufb-check-list">
                         <label v-for="regex in group.items" :key="regex.id" class="ufb-check-item">
                           <input
                             type="checkbox"
@@ -311,7 +291,6 @@
                       <button class="ufb-btn" type="button" @click="toggleRuleCollapsed(rule.id)">{{ isRuleCollapsed(rule.id) ? '展开' : '收起' }}</button>
                       <template v-if="!isRuleCollapsed(rule.id)">
                         <button class="ufb-btn" type="button" @click="toggleRuleEnabled(Number(index))">{{ rule.enabled ? '停用' : '启用' }}</button>
-                        <button class="ufb-btn" type="button" @click="copyRule(Number(index))">复制</button>
                         <button class="ufb-btn" type="button" :disabled="Number(index) === 0" @click="moveRule(Number(index), -1)">上移</button>
                         <button class="ufb-btn" type="button" :disabled="Number(index) >= messageSource.rules.length - 1" @click="moveRule(Number(index), 1)">下移</button>
                         <button class="ufb-btn ufb-btn--danger" type="button" @click="removeRule(Number(index))">删除</button>
@@ -433,12 +412,6 @@ const navEntries = [
   { id: 'rules', title: '消息来源与规则' },
 ] as const;
 
-const statusOptions = [
-  { value: 'active', label: '启用' },
-  { value: 'hidden', label: '停用' },
-  { value: 'archived', label: '归档' },
-] as const;
-
 function cloneDraft<T>(value: T): T {
   const rawValue = typeof value === 'object' && value !== null ? toRaw(value) : value;
   if (typeof structuredClone === 'function') {
@@ -549,6 +522,8 @@ function ensureMessageSource(item: any) {
       outputMode: 'html',
       rules: [],
     };
+  } else {
+    item.contentSource.outputMode = 'html';
   }
   return item.contentSource;
 }
@@ -583,6 +558,11 @@ function updateCurrentStatus(value: string) {
   }, `已切换状态为 ${props.api.getStatusLabel(value)}`);
 }
 
+function updateCurrentEnabled(enabled: boolean) {
+  updateCurrentStatus(enabled ? 'active' : 'hidden');
+  saveAll();
+}
+
 function updateCurrentWebCode(value: string) {
   withCurrentItem(item => {
     item.webCode = value;
@@ -613,6 +593,10 @@ function updateCurrentColor(value: string) {
   }, '已修改悬浮球颜色，记得保存');
 }
 
+function formatBallOptionLabel(item: any) {
+  return `${item.name?.trim() || '未命名悬浮球'} · ${props.api.getStatusLabel(item.status)}`;
+}
+
 function switchToCustomHtml() {
   withCurrentItem(item => {
     item.contentSource = { mode: 'custom_html' };
@@ -629,12 +613,16 @@ const messageSource = computed(() => {
   if (!currentItem.value || currentItem.value.contentSource?.mode !== 'message_rules') {
     return null;
   }
+  if (currentItem.value.contentSource.outputMode !== 'html') {
+    currentItem.value.contentSource.outputMode = 'html';
+  }
   return currentItem.value.contentSource;
 });
 
 const tavernRegexOptions = computed(() => props.api.listTavernRegexTemplates());
 const selectedTavernRegexIds = ref<string[]>([]);
 const collapsedRuleIds = ref<string[]>([]);
+const collapsedImportGroupScopes = ref<string[]>([]);
 const tavernRegexScopeOrder = ['character', 'preset', 'global'] as const;
 
 const groupedTavernRegexOptions = computed(() =>
@@ -663,19 +651,18 @@ watchEffect(() => {
   }
 });
 
+watchEffect(() => {
+  const validScopes = new Set(groupedTavernRegexOptions.value.map(group => group.scope));
+  const nextCollapsedScopes = collapsedImportGroupScopes.value.filter(scope => validScopes.has(scope));
+  if (nextCollapsedScopes.length !== collapsedImportGroupScopes.value.length) {
+    collapsedImportGroupScopes.value = nextCollapsedScopes;
+  }
+});
+
 function updateMessageTarget(value: string) {
   withMessageSource(source => {
     source.messageTarget = value;
   }, '已修改目标楼层，记得保存');
-}
-
-function updateOutputMode(value: string) {
-  if (value !== 'html' && value !== 'text' && value !== 'url') {
-    return;
-  }
-  withMessageSource(source => {
-    source.outputMode = value;
-  }, `已切换输出模式为 ${props.api.getOutputModeLabel(value)}`);
 }
 
 function addRule() {
@@ -702,6 +689,7 @@ function importTavernRegex() {
   withMessageSource(source => {
     source.rules.push(...rules);
   }, `已导入 ${rules.length} 条酒馆正则`);
+  collapsedRuleIds.value = Array.from(new Set([...collapsedRuleIds.value, ...rules.map(rule => rule.id)]));
   props.api.showToast('success', `已导入 ${rules.length} 条酒馆正则`);
 }
 
@@ -725,6 +713,18 @@ function clearSelectedTavernRegexes() {
   selectedTavernRegexIds.value = [];
 }
 
+function isImportGroupCollapsed(scope: string) {
+  return collapsedImportGroupScopes.value.includes(scope);
+}
+
+function toggleImportGroupCollapsed(scope: string) {
+  if (isImportGroupCollapsed(scope)) {
+    collapsedImportGroupScopes.value = collapsedImportGroupScopes.value.filter(currentScope => currentScope !== scope);
+    return;
+  }
+  collapsedImportGroupScopes.value = [...collapsedImportGroupScopes.value, scope];
+}
+
 function isRuleCollapsed(ruleId: string) {
   return collapsedRuleIds.value.includes(ruleId);
 }
@@ -744,14 +744,6 @@ function moveRule(index: number, offset: number) {
     const [rule] = source.rules.splice(index, 1);
     source.rules.splice(nextIndex, 0, rule);
   }, '已调整规则顺序，记得保存');
-}
-
-function copyRule(index: number) {
-  withMessageSource(source => {
-    const rule = source.rules[index];
-    if (!rule) return;
-    source.rules.splice(index + 1, 0, props.api.createRegexRule({ ...rule, id: '' }));
-  }, '已复制规则，记得保存');
 }
 
 function removeRule(index: number) {
@@ -774,15 +766,6 @@ function updateRuleField(index: number, key: 'name' | 'mode' | 'flags' | 'patter
     if (!rule) return;
     rule[key] = value;
   }, '已修改规则内容，记得保存');
-}
-
-function getContentSummary(item: any) {
-  if (item.contentSource?.mode === 'message_rules') {
-    const rules = Array.isArray(item.contentSource.rules) ? item.contentSource.rules : [];
-    const enabledCount = rules.filter((rule: any) => rule.enabled).length;
-    return `消息规则 · ${item.contentSource.messageTarget || props.api.defaultMessageTarget} · ${props.api.getOutputModeLabel(item.contentSource.outputMode)} · ${enabledCount}/${rules.length}`;
-  }
-  return item.webCode?.trim() ? '自定义网页 · 已配置网页' : '自定义网页 · 未配置网页';
 }
 
 const previewState = computed(() => {
@@ -822,15 +805,13 @@ const previewState = computed(() => {
 
   return {
     kind: 'segments' as const,
-    summary: `目标楼层 ${result.messageTarget} · 消息 ID ${result.messageId} · ${props.api.getOutputModeLabel(item.contentSource.outputMode)} · ${result.segments.length} 段结果`,
+    summary: `目标楼层 ${result.messageTarget} · 消息 ID ${result.messageId} · ${result.segments.length} 段结果`,
     warning: result.warnings?.[0] ?? '',
     segments: result.segments.map((segment: string, index: number) => {
-      const isUrl = item.contentSource.outputMode === 'url';
-      const urlResult = isUrl ? props.api.parsePreviewUrl(segment) : null;
       return {
         key: `${index}-${segment.slice(0, 16)}`,
-        title: `${item.contentSource.outputMode === 'text' ? '文本' : item.contentSource.outputMode === 'url' ? 'URL' : '片段'} ${index + 1}`,
-        meta: isUrl ? (urlResult?.ok ? 'URL 可用于预览' : urlResult?.error ?? 'URL 无效') : `${segment.length} 个字符`,
+        title: `片段 ${index + 1}`,
+        meta: `${segment.length} 个字符`,
         content: segment.length > 1200 ? `${segment.slice(0, 1200)}…` : segment,
       };
     }),
@@ -857,10 +838,6 @@ const previewState = computed(() => {
   gap:16px;
   padding:20px 24px 16px;
   border-bottom:1px solid rgba(255,255,255,0.08);
-}
-.ufb-topbar h1{
-  margin:2px 0 0;
-  font-size:26px;
 }
 .ufb-topbar__status{
   display:flex;
@@ -889,8 +866,34 @@ const previewState = computed(() => {
 }
 .ufb-topbar__actions{
   display:flex;
-  flex-wrap:wrap;
+  align-items:center;
   gap:10px;
+}
+.ufb-icon-btn{
+  width:42px;
+  height:42px;
+  border:none;
+  border-radius:14px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  cursor:pointer;
+  font-size:20px;
+  line-height:1;
+  color:#e2e8f0;
+  background:rgba(255,255,255,0.08);
+}
+.ufb-icon-btn--ghost{
+  background:transparent;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08);
+}
+.ufb-icon-btn--primary{
+  color:#eff6ff;
+  background:linear-gradient(135deg, #2563eb, #0f766e);
+}
+.ufb-icon-btn--danger{
+  color:#fff;
+  background:rgba(239,68,68,0.24);
 }
 .ufb-layout{
   flex:1 1 auto;
@@ -941,19 +944,17 @@ const previewState = computed(() => {
   flex-direction:column;
   gap:18px;
 }
+.ufb-section--rules{
+  min-height:0;
+}
 .ufb-section__head{
   display:flex;
-  align-items:flex-start;
+  align-items:center;
   justify-content:space-between;
   gap:16px;
 }
-.ufb-section__head h2{
-  margin:0;
-  font-size:22px;
-}
-.ufb-section__head p{
-  margin:6px 0 0;
-  color:#bfd3ea;
+.ufb-section__head--toolbar{
+  flex-wrap:wrap;
 }
 .ufb-split{
   display:grid;
@@ -1020,14 +1021,22 @@ const previewState = computed(() => {
   gap:14px;
 }
 .ufb-field{
-  display:flex;
-  flex-direction:column;
-  gap:8px;
+  display:grid;
+  grid-template-columns:120px minmax(0, 1fr);
+  align-items:center;
+  gap:12px;
 }
 .ufb-field span{
   font-size:13px;
   font-weight:700;
   color:#dbeafe;
+}
+.ufb-field > :not(span){
+  min-width:0;
+}
+.ufb-field--stack{
+  grid-template-columns:minmax(0, 1fr);
+  align-items:stretch;
 }
 .ufb-input,
 .ufb-textarea,
@@ -1055,10 +1064,58 @@ const previewState = computed(() => {
 .ufb-input--small{
   width:96px;
 }
+.ufb-toolbar-select{
+  flex:1 1 320px;
+  max-width:520px;
+}
 .ufb-inline-actions{
   display:flex;
   flex-wrap:wrap;
   gap:10px;
+}
+.ufb-switch{
+  display:inline-flex;
+  align-items:center;
+  gap:12px;
+  min-height:40px;
+  cursor:pointer;
+}
+.ufb-switch input{
+  position:absolute;
+  opacity:0;
+  pointer-events:none;
+}
+.ufb-switch__track{
+  position:relative;
+  width:50px;
+  height:28px;
+  border-radius:999px;
+  flex:0 0 auto;
+  background:rgba(148,163,184,0.35);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,0.08);
+  transition:background 0.2s ease;
+}
+.ufb-switch__thumb{
+  position:absolute;
+  top:3px;
+  left:3px;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  background:#fff;
+  box-shadow:0 4px 10px rgba(15,23,42,0.35);
+  transition:transform 0.2s ease;
+}
+.ufb-switch input:checked + .ufb-switch__track{
+  background:linear-gradient(135deg, #2563eb, #0f766e);
+}
+.ufb-switch input:checked + .ufb-switch__track .ufb-switch__thumb{
+  transform:translateX(22px);
+}
+.ufb-switch__text{
+  font-size:13px;
+  font-weight:700;
+  color:#e2e8f0;
 }
 .ufb-btn{
   min-width:86px;
@@ -1107,10 +1164,28 @@ const previewState = computed(() => {
   flex-direction:column;
   gap:8px;
 }
+.ufb-import-group__head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  width:100%;
+  border:none;
+  border-radius:14px;
+  padding:10px 12px;
+  cursor:pointer;
+  color:#e2e8f0;
+  background:rgba(255,255,255,0.04);
+}
 .ufb-import-group__title{
   font-size:13px;
   font-weight:700;
   color:#dbeafe;
+}
+.ufb-import-group__toggle{
+  flex:0 0 auto;
+  font-size:12px;
+  color:#bfd3ea;
 }
 .ufb-check-list{
   display:flex;
@@ -1173,9 +1248,17 @@ const previewState = computed(() => {
   background:var(--chip-color);
 }
 .ufb-rules{
+  flex:1 1 auto;
+  min-height:0;
   display:grid;
   grid-template-columns:minmax(0, 1fr) 340px;
   gap:16px;
+  align-items:stretch;
+}
+.ufb-rules__main{
+  min-height:0;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
 }
 .ufb-rules__preview{
   overflow:hidden;
@@ -1294,6 +1377,17 @@ const previewState = computed(() => {
   .ufb-split,
   .ufb-rules{
     grid-template-columns:1fr;
+  }
+  .ufb-field{
+    grid-template-columns:88px minmax(0, 1fr);
+    align-items:flex-start;
+  }
+  .ufb-field--stack{
+    grid-template-columns:minmax(0, 1fr);
+  }
+  .ufb-range-row,
+  .ufb-color-row{
+    flex-wrap:wrap;
   }
 }
 </style>
