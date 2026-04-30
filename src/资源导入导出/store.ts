@@ -75,6 +75,18 @@ type CharacterDeleteConfirmState = {
 };
 
 type TavernResourceIndex = Map<string, TavernResourceMatch[]>;
+type ExportArchiveEntry = {
+  path: string;
+  blob: Blob;
+  lastModified: Date;
+};
+type ExportArchiveCollector = {
+  downloadName: string;
+  addFile: (dirPath: string, filename: string, data: Blob | string) => void;
+  hasFile: (dirPath: string, filename: string) => boolean;
+  size: () => number;
+  download: () => Promise<void>;
+};
 
 async function readDirHandle(
   handle: FileSystemDirectoryHandleLike,
@@ -230,6 +242,211 @@ function looksLikeRegex(data: unknown) {
 
 function looksLikePresetPrompt(value: unknown) {
   return isPlainObject(value) && objHasAnyKey(value, ['id', 'name', 'enabled']);
+}
+
+const PRESET_SYSTEM_PROMPT_IDS = new Set(['main', 'nsfw', 'jailbreak', 'enhanceDefinitions']);
+const PRESET_PLACEHOLDER_PROMPT_IDS = new Set([
+  'worldInfoBefore',
+  'personaDescription',
+  'charDescription',
+  'charPersonality',
+  'scenario',
+  'worldInfoAfter',
+  'dialogueExamples',
+  'chatHistory',
+]);
+const PRESET_NON_INJECTABLE_PLACEHOLDER_IDS = new Set(['dialogueExamples', 'chatHistory']);
+
+function toNativePresetPrompt(prompt: PresetPrompt) {
+  const isSystemPrompt = PRESET_SYSTEM_PROMPT_IDS.has(prompt.id);
+  const isPlaceholderPrompt = PRESET_PLACEHOLDER_PROMPT_IDS.has(prompt.id);
+  const isNormalPrompt = !isSystemPrompt && !isPlaceholderPrompt;
+
+  const result: Record<string, unknown> = {
+    identifier: prompt.id,
+    name: prompt.name,
+    enabled: prompt.enabled,
+    role: prompt.role,
+    system_prompt: isSystemPrompt || isPlaceholderPrompt,
+    marker: isPlaceholderPrompt,
+    forbid_overrides: false,
+  };
+
+  if ((isNormalPrompt || isPlaceholderPrompt) && !PRESET_NON_INJECTABLE_PLACEHOLDER_IDS.has(prompt.id)) {
+    result.injection_position = (prompt.position?.type ?? 'relative') === 'relative' ? 0 : 1;
+    result.injection_depth = prompt.position?.depth ?? 4;
+    result.injection_order = prompt.position?.order ?? 100;
+  }
+
+  if (isNormalPrompt || isSystemPrompt) {
+    result.content = prompt.content ?? '';
+  }
+
+  if (prompt.extra) {
+    result.extra = prompt.extra;
+  }
+
+  return result;
+}
+
+function toNativePresetRegexScript(script: any) {
+  if (!script || typeof script !== 'object') return script;
+  if (script.source === undefined) return script;
+
+  const source = script.source || {};
+  const destination = script.destination || {};
+
+  return {
+    id: String(script.id || '').trim(),
+    scriptName: String(script.script_name || '').trim(),
+    disabled: script.enabled === false,
+    runOnEdit: Boolean(script.run_on_edit),
+    findRegex: String(script.find_regex ?? ''),
+    trimStrings: Array.isArray(script.trim_strings) ? script.trim_strings : [],
+    replaceString: String(script.replace_string ?? ''),
+    placement: [
+      ...(source.user_input ? [1] : []),
+      ...(source.ai_output ? [2] : []),
+      ...(source.slash_command ? [3] : []),
+      ...(source.world_info ? [5] : []),
+    ],
+    substituteRegex: Number.isFinite(Number(script.substituteRegex)) ? Number(script.substituteRegex) : 0,
+    minDepth: script.min_depth ?? null,
+    maxDepth: script.max_depth ?? null,
+    markdownOnly: Boolean(destination.display),
+    promptOnly: Boolean(destination.prompt),
+  };
+}
+
+function toRawTavernRegexScript(script: any) {
+  if (!script || typeof script !== 'object') return script;
+
+  const placement = Array.isArray(script.placement) ? script.placement.map((value: unknown) => Number(value)) : [];
+  const source =
+    script.source && typeof script.source === 'object'
+      ? {
+          user_input: Boolean(script.source.user_input),
+          ai_output: Boolean(script.source.ai_output),
+          slash_command: Boolean(script.source.slash_command),
+          world_info: Boolean(script.source.world_info),
+          ...(script.source.reasoning !== undefined ? { reasoning: Boolean(script.source.reasoning) } : {}),
+        }
+      : {
+          user_input: placement.includes(1),
+          ai_output: placement.includes(2),
+          slash_command: placement.includes(3),
+          world_info: placement.includes(5),
+          ...(placement.includes(6) ? { reasoning: true } : {}),
+        };
+
+  const destination =
+    script.destination && typeof script.destination === 'object'
+      ? {
+          display: Boolean(script.destination.display),
+          prompt: Boolean(script.destination.prompt),
+        }
+      : script.promptOnly
+        ? { display: false, prompt: true }
+        : script.markdownOnly
+          ? { display: true, prompt: false }
+          : { display: true, prompt: true };
+
+  return {
+    id: String(script.id || '').trim(),
+    script_name: String(script.script_name || script.scriptName || script.name || '').trim(),
+    enabled: script.disabled === true ? false : script.enabled !== false,
+    find_regex: String(script.find_regex ?? script.findRegex ?? ''),
+    replace_string: String(script.replace_string ?? script.replaceString ?? ''),
+    trim_strings: Array.isArray(script.trim_strings) ? script.trim_strings : Array.isArray(script.trimStrings) ? script.trimStrings : [],
+    source,
+    destination,
+    run_on_edit: Boolean(script.run_on_edit ?? script.runOnEdit),
+    min_depth: script.min_depth ?? script.minDepth ?? null,
+    max_depth: script.max_depth ?? script.maxDepth ?? null,
+  };
+}
+
+function toLegacyTavernRegexScript(script: any) {
+  if (!script || typeof script !== 'object') return script;
+  if (script.source !== undefined) return toNativePresetRegexScript(script);
+  return {
+    id: String(script.id || '').trim(),
+    scriptName: String(script.scriptName || script.script_name || script.name || '').trim(),
+    findRegex: String(script.findRegex ?? script.find_regex ?? ''),
+    replaceString: String(script.replaceString ?? script.replace_string ?? ''),
+    trimStrings: Array.isArray(script.trimStrings) ? script.trimStrings : Array.isArray(script.trim_strings) ? script.trim_strings : [],
+    placement: Array.isArray(script.placement) ? script.placement.map((value: unknown) => Number(value)) : [],
+    disabled: script.disabled === true || script.enabled === false,
+    markdownOnly: Boolean(script.markdownOnly),
+    promptOnly: Boolean(script.promptOnly),
+    runOnEdit: Boolean(script.runOnEdit ?? script.run_on_edit),
+    substituteRegex: Number.isFinite(Number(script.substituteRegex)) ? Number(script.substituteRegex) : 0,
+    minDepth: script.minDepth ?? script.min_depth ?? null,
+    maxDepth: script.maxDepth ?? script.max_depth ?? null,
+  };
+}
+
+function bundlePresetForNativeImport(preset: Preset) {
+  const usedPrompts = preset.prompts.map(toNativePresetPrompt);
+  const unusedPrompts = preset.prompts_unused.map(toNativePresetPrompt);
+  const extensions = preset.extensions || {};
+  const { regex_scripts, tavern_helper, ...restExtensions } = extensions;
+
+  return {
+    max_context_unlocked: true,
+    openai_max_context: preset.settings.max_context,
+    openai_max_tokens: preset.settings.max_completion_tokens,
+    n: preset.settings.reply_count,
+    stream_openai: preset.settings.should_stream,
+    temp_openai: preset.settings.temperature,
+    freq_pen_openai: preset.settings.frequency_penalty,
+    pres_pen_openai: preset.settings.presence_penalty,
+    top_p_openai: preset.settings.top_p,
+    repetition_penalty_openai: preset.settings.repetition_penalty,
+    min_p_openai: preset.settings.min_p,
+    top_k_openai: preset.settings.top_k,
+    top_a_openai: preset.settings.top_a,
+    temperature: preset.settings.temperature,
+    frequency_penalty: preset.settings.frequency_penalty,
+    presence_penalty: preset.settings.presence_penalty,
+    top_p: preset.settings.top_p,
+    repetition_penalty: preset.settings.repetition_penalty,
+    min_p: preset.settings.min_p,
+    top_k: preset.settings.top_k,
+    top_a: preset.settings.top_a,
+    seed: preset.settings.seed,
+    squash_system_messages: preset.settings.squash_system_messages,
+    reasoning_effort: preset.settings.reasoning_effort,
+    show_thoughts: preset.settings.request_thoughts,
+    request_images: preset.settings.request_images,
+    function_calling: preset.settings.enable_function_calling,
+    enable_web_search: preset.settings.enable_web_search,
+    image_inlining: preset.settings.allow_sending_images !== 'disabled',
+    inline_image_quality: preset.settings.allow_sending_images === 'disabled' ? 'auto' : preset.settings.allow_sending_images,
+    video_inlining: preset.settings.allow_sending_videos,
+    names_behavior: {
+      none: -1,
+      default: 0,
+      content: 2,
+      completion: 1,
+    }[preset.settings.character_name_prefix],
+    wrap_in_quotes: preset.settings.wrap_user_messages_in_quotes,
+    prompts: [...usedPrompts, ...unusedPrompts],
+    prompt_order: [
+      {
+        character_id: 100001,
+        order: usedPrompts.map(prompt => ({
+          identifier: String(prompt.identifier || ''),
+          enabled: prompt.enabled !== false,
+        })),
+      },
+    ],
+    extensions: {
+      regex_scripts: Array.isArray(regex_scripts) ? regex_scripts.map(toNativePresetRegexScript) : [],
+      tavern_helper: tavern_helper || {},
+      ...restExtensions,
+    },
+  };
 }
 
 function looksLikeHelperPreset(data: unknown): data is Preset {
@@ -674,17 +891,246 @@ function sanitizeFilename(name: string) {
   return (cleaned || 'unnamed').slice(0, 120);
 }
 
+function stripUuidLikeSuffix(name: string) {
+  return String(name || '')
+    .replace(/(?:[_-]{1,2}|\s+)?[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function sanitizeExportStem(name: string) {
+  return sanitizeFilename(stripUuidLikeSuffix(name) || name);
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return String(error);
+}
+
+function isFileSystemStateCacheError(error: unknown) {
+  const message = getErrorMessage(error).toLowerCase();
+  return (
+    message.includes('state cached in an interface object') ||
+    message.includes('state had changed since it was read from disk')
+  );
+}
+
+function isFileNotFoundError(error: unknown) {
+  const name = String((error as { name?: unknown } | null | undefined)?.name || '');
+  const message = getErrorMessage(error).toLowerCase();
+  return name === 'NotFoundError' || message.includes('not found');
+}
+
+function normalizeExportError(error: unknown) {
+  if (isFileSystemStateCacheError(error)) {
+    return '手机端浏览器的目录句柄已失效，请重试当前导出；若仍失败，请重新选择一次导出文件夹后再试';
+  }
+  return getErrorMessage(error);
+}
+
+let hasShownExportDownloadFallbackToast = false;
+let activeExportArchive: ExportArchiveCollector | null = null;
+const ZIP_UTF8_FLAG = 0x0800;
+const ZIP_CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let crc = i;
+    for (let j = 0; j < 8; j++) {
+      crc = (crc & 1) !== 0 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+    }
+    table[i] = crc >>> 0;
+  }
+  return table;
+})();
+
+function isArchiveExportActive() {
+  return activeExportArchive !== null;
+}
+
+function isLikelyMobileBrowser() {
+  const ua = String(navigator.userAgent || navigator.vendor || '').toLowerCase();
+  if (/android|iphone|ipad|ipod|mobile|harmonyos/.test(ua)) return true;
+  const coarsePointer = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  const shortEdge = Math.min(window.innerWidth || 0, window.innerHeight || 0);
+  return coarsePointer && shortEdge > 0 && shortEdge <= 1024;
+}
+
+function formatFilenameTimestamp(date = new Date()) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    '_',
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('');
+}
+
+function triggerDownload(blob: Blob, filename: string) {
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.style.display = 'none';
+  (document.body || document.documentElement).appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 30_000);
+}
+
+function crc32(bytes: Uint8Array) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc = ZIP_CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function toZipDosDateTime(date: Date) {
+  const year = Math.min(2107, Math.max(1980, date.getFullYear()));
+  return {
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate(),
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+  };
+}
+
+async function buildZipBlob(entries: ExportArchiveEntry[]) {
+  const encoder = new TextEncoder();
+  const localParts: BlobPart[] = [];
+  const centralParts: BlobPart[] = [];
+  let localOffset = 0;
+  let centralSize = 0;
+
+  for (const entry of entries) {
+    const nameBytes = encoder.encode(normalizePath(entry.path));
+    const dataBytes = new Uint8Array(await entry.blob.arrayBuffer());
+    const checksum = crc32(dataBytes);
+    const { date, time } = toZipDosDateTime(entry.lastModified);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, ZIP_UTF8_FLAG, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint16(10, time, true);
+    localView.setUint16(12, date, true);
+    localView.setUint32(14, checksum, true);
+    localView.setUint32(18, dataBytes.length, true);
+    localView.setUint32(22, dataBytes.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localView.setUint16(28, 0, true);
+    localHeader.set(nameBytes, 30);
+    localParts.push(localHeader, dataBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, ZIP_UTF8_FLAG, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint16(12, time, true);
+    centralView.setUint16(14, date, true);
+    centralView.setUint32(16, checksum, true);
+    centralView.setUint32(20, dataBytes.length, true);
+    centralView.setUint32(24, dataBytes.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint16(30, 0, true);
+    centralView.setUint16(32, 0, true);
+    centralView.setUint16(34, 0, true);
+    centralView.setUint16(36, 0, true);
+    centralView.setUint32(38, 0, true);
+    centralView.setUint32(42, localOffset, true);
+    centralHeader.set(nameBytes, 46);
+    centralParts.push(centralHeader);
+
+    localOffset += localHeader.length + dataBytes.length;
+    centralSize += centralHeader.length;
+  }
+
+  const endHeader = new Uint8Array(22);
+  const endView = new DataView(endHeader.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(4, 0, true);
+  endView.setUint16(6, 0, true);
+  endView.setUint16(8, entries.length, true);
+  endView.setUint16(10, entries.length, true);
+  endView.setUint32(12, centralSize, true);
+  endView.setUint32(16, localOffset, true);
+  endView.setUint16(20, 0, true);
+
+  return new Blob([...localParts, ...centralParts, endHeader], { type: 'application/zip' });
+}
+
+function createExportArchiveCollector(downloadName: string): ExportArchiveCollector {
+  const entries = new Map<string, ExportArchiveEntry>();
+  return {
+    downloadName,
+    addFile(dirPath, filename, data) {
+      const path = normalizePath(dirPath ? `${dirPath}/${filename}` : filename);
+      const blob = typeof data === 'string' ? new Blob([data], { type: inferTextMimeType(filename) }) : data;
+      entries.set(path, { path, blob, lastModified: new Date() });
+    },
+    hasFile(dirPath, filename) {
+      const path = normalizePath(dirPath ? `${dirPath}/${filename}` : filename);
+      return entries.has(path);
+    },
+    size() {
+      return entries.size;
+    },
+    async download() {
+      const blob = await buildZipBlob(Array.from(entries.values()));
+      triggerDownload(blob, `${sanitizeFilename(downloadName)}.zip`);
+    },
+  };
+}
+
+async function withFileSystemRetry<T>(label: string, action: () => Promise<T>): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      lastError = error;
+      if (!isFileSystemStateCacheError(error) || attempt >= 2) throw error;
+      console.warn(`[资源导入导出] ${label} 时目录句柄缓存失效，准备重试`, { attempt: attempt + 1, error });
+      await new Promise<void>(resolve => setTimeout(resolve, 80 * (attempt + 1)));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
+}
+
 async function ensureDir(root: FileSystemDirectoryHandleLike, dirName: string) {
-  return root.getDirectoryHandle(dirName, { create: true });
+  return ensureDirByPath(root, dirName);
+}
+
+async function ensureDirByPath(root: FileSystemDirectoryHandleLike, dirPath: string) {
+  const normalized = normalizePath(dirPath);
+  if (!normalized) return root;
+
+  await withFileSystemRetry(`创建目录 ${normalized}`, async () => {
+    let current = root;
+    const parts = normalized.split('/').filter(Boolean);
+    for (const part of parts) {
+      current = await current.getDirectoryHandle(part, { create: true });
+    }
+  });
+
+  return getDirHandleByPath(root, normalized);
 }
 
 async function getDirHandleByPath(root: FileSystemDirectoryHandleLike, dirPath: string) {
-  let current = root;
-  const parts = normalizePath(dirPath).split('/').filter(Boolean);
-  for (const part of parts) {
-    current = await current.getDirectoryHandle(part, { create: false });
-  }
-  return current;
+  return withFileSystemRetry(`打开目录 ${dirPath}`, async () => {
+    let current = root;
+    const parts = normalizePath(dirPath).split('/').filter(Boolean);
+    for (const part of parts) {
+      current = await current.getDirectoryHandle(part, { create: false });
+    }
+    return current;
+  });
 }
 
 async function removeFileByPath(root: FileSystemDirectoryHandleLike, relativePath: string) {
@@ -692,35 +1138,125 @@ async function removeFileByPath(root: FileSystemDirectoryHandleLike, relativePat
   const parts = normalized.split('/').filter(Boolean);
   const fileName = parts.pop();
   if (!fileName) throw new Error('删除失败：无效的文件路径');
-  const parent = parts.length > 0 ? await getDirHandleByPath(root, parts.join('/')) : root;
-  if (typeof parent.removeEntry !== 'function') {
-    throw new Error('当前目录句柄不支持删除文件');
-  }
-  await parent.removeEntry(fileName, { recursive: false });
+  await withFileSystemRetry(`删除文件 ${normalized}`, async () => {
+    const parent = parts.length > 0 ? await getDirHandleByPath(root, parts.join('/')) : root;
+    if (typeof parent.removeEntry !== 'function') {
+      throw new Error('当前目录句柄不支持删除文件');
+    }
+    await parent.removeEntry(fileName, { recursive: false });
+  });
 }
 
 async function tryGetFile(dir: FileSystemDirectoryHandleLike, filename: string): Promise<File | null> {
   try {
-    const fileHandle = await dir.getFileHandle(filename, { create: false });
-    if (typeof fileHandle.getFile !== 'function') return null;
-    return await fileHandle.getFile();
-  } catch {
+    return await withFileSystemRetry(`读取文件 ${filename}`, async () => {
+      const fileHandle = await dir.getFileHandle(filename, { create: false });
+      if (typeof fileHandle.getFile !== 'function') return null;
+      return await fileHandle.getFile();
+    });
+  } catch (error) {
+    if (!isFileNotFoundError(error)) throw error;
     return null;
   }
 }
 
+async function writeFile(dir: FileSystemDirectoryHandleLike, filename: string, data: Blob | string) {
+  await withFileSystemRetry(`写入文件 ${filename}`, async () => {
+    const fileHandle = await dir.getFileHandle(filename, { create: true });
+    const writable = await fileHandle.createWritable({ keepExistingData: false });
+    let writeError: unknown;
+    try {
+      await writable.write(data);
+    } catch (error) {
+      writeError = error;
+      throw error;
+    } finally {
+      try {
+        await writable.close();
+      } catch (closeError) {
+        if (!writeError) throw closeError;
+      }
+    }
+  });
+}
+
 async function writeTextFile(dir: FileSystemDirectoryHandleLike, filename: string, text: string) {
-  const fileHandle = await dir.getFileHandle(filename, { create: true });
-  const writable = await fileHandle.createWritable({ keepExistingData: false });
-  await writable.write(text);
-  await writable.close();
+  await writeFile(dir, filename, text);
 }
 
 async function writeBlobFile(dir: FileSystemDirectoryHandleLike, filename: string, blob: Blob) {
-  const fileHandle = await dir.getFileHandle(filename, { create: true });
-  const writable = await fileHandle.createWritable({ keepExistingData: false });
-  await writable.write(blob);
-  await writable.close();
+  await writeFile(dir, filename, blob);
+}
+
+async function tryGetFileByPath(root: FileSystemDirectoryHandleLike, dirPath: string, filename: string, options?: { createDir?: boolean }) {
+  try {
+    const dir = options?.createDir ? await ensureDirByPath(root, dirPath) : !normalizePath(dirPath) ? root : await getDirHandleByPath(root, dirPath);
+    return tryGetFile(dir, filename);
+  } catch (error) {
+    if (isFileSystemStateCacheError(error)) return null;
+    throw error;
+  }
+}
+
+function buildDownloadFilename(dirPath: string, filename: string) {
+  const prefix = normalizePath(dirPath)
+    .split('/')
+    .filter(Boolean)
+    .map(part => sanitizeFilename(part))
+    .filter(Boolean)
+    .join('__');
+  return prefix ? `${prefix}__${sanitizeFilename(filename)}` : sanitizeFilename(filename);
+}
+
+function inferTextMimeType(filename: string) {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.json')) return 'application/json;charset=utf-8';
+  if (lower.endsWith('.jsonl')) return 'application/x-ndjson;charset=utf-8';
+  if (lower.endsWith('.js')) return 'text/javascript;charset=utf-8';
+  if (lower.endsWith('.css')) return 'text/css;charset=utf-8';
+  if (lower.endsWith('.html')) return 'text/html;charset=utf-8';
+  return 'text/plain;charset=utf-8';
+}
+
+async function downloadExportFallback(dirPath: string, filename: string, data: Blob | string) {
+  const blob = typeof data === 'string' ? new Blob([data], { type: inferTextMimeType(filename) }) : data;
+  const downloadName = buildDownloadFilename(dirPath, filename);
+  triggerDownload(blob, downloadName);
+
+  if (!hasShownExportDownloadFallbackToast) {
+    hasShownExportDownloadFallbackToast = true;
+    toastr.warning('手机端目录写入失败，已自动切换为浏览器下载；文件会保存到浏览器默认下载位置');
+  }
+
+  await new Promise<void>(resolve => setTimeout(resolve, 0));
+}
+
+async function writeTextFileByPath(root: FileSystemDirectoryHandleLike, dirPath: string, filename: string, text: string) {
+  if (activeExportArchive) {
+    activeExportArchive.addFile(dirPath, filename, text);
+    return;
+  }
+  try {
+    const dir = await ensureDirByPath(root, dirPath);
+    await writeTextFile(dir, filename, text);
+  } catch (error) {
+    if (!isFileSystemStateCacheError(error)) throw error;
+    await downloadExportFallback(dirPath, filename, text);
+  }
+}
+
+async function writeBlobFileByPath(root: FileSystemDirectoryHandleLike, dirPath: string, filename: string, blob: Blob) {
+  if (activeExportArchive) {
+    activeExportArchive.addFile(dirPath, filename, blob);
+    return;
+  }
+  try {
+    const dir = await ensureDirByPath(root, dirPath);
+    await writeBlobFile(dir, filename, blob);
+  } catch (error) {
+    if (!isFileSystemStateCacheError(error)) throw error;
+    await downloadExportFallback(dirPath, filename, blob);
+  }
 }
 
 function parseExtensionBlocks(text: string) {
@@ -2241,28 +2777,39 @@ export const useImportStore = defineStore('resource-importer', () => {
     return exportConflictStrategy.value === 'skip';
   }
 
+  async function shouldSkipExportFile(root: FileSystemDirectoryHandleLike, dirPath: string, filename: string) {
+    if (!shouldSkipIfExists()) return false;
+    if (activeExportArchive) return activeExportArchive.hasFile(dirPath, filename);
+    return Boolean(await tryGetFileByPath(root, dirPath, filename, { createDir: true }));
+  }
+
+  function shouldUseMobileZipExport(items: ImportEntry[]) {
+    return items.length > 1 && isLikelyMobileBrowser();
+  }
+
   async function exportPreset(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '预设');
+    const dirPath = '预设';
     const name = String(item.path || item.displayName || '').trim();
-    const filename = `${sanitizeFilename(name)}.json`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = `${sanitizeExportStem(name)}.json`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
     }
     const preset = getPreset(name as any);
-    await writeTextFile(dir, filename, JSON.stringify(preset, null, 2));
+    const bundled = bundlePresetForNativeImport(preset);
+    await writeTextFileByPath(root, dirPath, filename, JSON.stringify(bundled, null, 2));
   }
 
   async function exportWorldbook(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '世界书');
+    const dirPath = '世界书';
     const name = String(item.path || item.displayName || '').trim();
-    const filename = `${sanitizeFilename(name)}.json`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = `${sanitizeExportStem(name)}.json`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2277,21 +2824,21 @@ export const useImportStore = defineStore('resource-importer', () => {
     });
     if (!resp.ok) throw new Error(`获取世界书失败: HTTP ${resp.status}`);
     const data = await resp.json();
-    await writeTextFile(dir, filename, JSON.stringify(data, null, 2));
+    await writeTextFileByPath(root, dirPath, filename, JSON.stringify(data, null, 2));
   }
 
   async function exportCharacter(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '角色卡');
+    const dirPath = '角色卡';
     const avatar = String(item.path || '').trim();
     if (!avatar) throw new Error('角色卡缺少 avatar');
 
-    const display = sanitizeFilename(String(item.displayName || '').trim());
+    const display = sanitizeExportStem(String(item.displayName || '').trim());
     const avatarLeaf = avatar.split('/').pop() || avatar;
     const avatarNoExt = stripExt(avatarLeaf);
-    const avatarClean = sanitizeFilename(avatarLeaf);
-    const avatarNoExtClean = sanitizeFilename(avatarNoExt);
+    const avatarClean = sanitizeExportStem(avatarLeaf);
+    const avatarNoExtClean = sanitizeExportStem(avatarNoExt);
 
     const collapseRepeatedPrefix = (prefix: string, name: string) => {
       if (!prefix) return name;
@@ -2308,7 +2855,7 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     if (characterExportFormat.value === 'json') {
       const filename = isDupName ? `${display}.json` : avatarAlreadyPrefixed ? `${suffixNoExt}.json` : `${display}__${suffixNoExt}.json`;
-      if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+      if (await shouldSkipExportFile(root, dirPath, filename)) {
         item.status = 'skipped';
         item.errorMessage = '文件已存在，已跳过';
         return;
@@ -2321,9 +2868,9 @@ export const useImportStore = defineStore('resource-importer', () => {
 
       try {
         const parsed = JSON.parse(raw) as unknown;
-        await writeTextFile(dir, filename, JSON.stringify(parsed, null, 2));
+        await writeTextFileByPath(root, dirPath, filename, JSON.stringify(parsed, null, 2));
       } catch {
-        await writeTextFile(dir, filename, raw);
+        await writeTextFileByPath(root, dirPath, filename, raw);
       }
 
       return;
@@ -2331,7 +2878,7 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     const hasPng = avatarLeaf.toLowerCase().endsWith('.png');
     const filename = isDupName ? `${display}.png` : avatarAlreadyPrefixed ? `${suffixFull}${hasPng ? '' : '.png'}` : `${display}__${suffixFull}${hasPng ? '' : '.png'}`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2347,17 +2894,17 @@ export const useImportStore = defineStore('resource-importer', () => {
     });
     if (!resp.ok) throw new Error(`导出角色卡失败: HTTP ${resp.status}`);
     const blob = await resp.blob();
-    await writeBlobFile(dir, filename, blob);
+    await writeBlobFileByPath(root, dirPath, filename, blob);
   }
 
   async function exportRegex(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '正则');
+    const dirPath = '正则';
     const id = String(item.path || '').trim();
     if (!id) throw new Error('正则缺少 id');
-    const filename = `${sanitizeFilename(item.displayName)}__${sanitizeFilename(id)}.json`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = `${sanitizeExportStem(item.displayName)}.json`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2366,42 +2913,8 @@ export const useImportStore = defineStore('resource-importer', () => {
     const regexes = typeof getTavernRegexes === 'function' ? getTavernRegexes({ type: 'global' }) : [];
     const regex = (Array.isArray(regexes) ? regexes : []).find((r: any) => String(r?.id || '').trim() === id);
     if (!regex) throw new Error('找不到该正则条目（可能已被删除）');
-
-    const legacy = (() => {
-      const r: any = regex as any;
-      const placement: number[] = [];
-      const src = r?.source || {};
-      if (src?.user_input) placement.push(1);
-      if (src?.ai_output) placement.push(2);
-      if (src?.slash_command) placement.push(3);
-      if (src?.world_info) placement.push(5);
-      if (src?.reasoning) placement.push(6);
-
-      const dst = r?.destination || {};
-      const display = Boolean(dst?.display);
-      const prompt = Boolean(dst?.prompt);
-      const promptOnly = prompt && !display;
-      const markdownOnly = display && !prompt;
-
-      return {
-        id: String(r?.id || '').trim(),
-        scriptName: String(r?.script_name || '').trim() || String(item.displayName || '').trim() || String(r?.id || '').trim(),
-        findRegex: String(r?.find_regex ?? ''),
-        replaceString: String(r?.replace_string ?? ''),
-        trimStrings: Array.isArray(r?.trim_strings) ? r.trim_strings : [],
-        placement,
-        disabled: r?.enabled === false,
-        markdownOnly,
-        promptOnly,
-        runOnEdit: Boolean(r?.run_on_edit),
-        substituteRegex: Number.isFinite(Number(r?.substituteRegex)) ? Number(r?.substituteRegex) : 0,
-        minDepth: r?.min_depth ?? null,
-        maxDepth: r?.max_depth ?? null,
-      };
-    })();
-
-    // 与酒馆/Folder-Manager 的正则导出格式保持一致（camelCase）
-    await writeTextFile(dir, filename, JSON.stringify(legacy, null, 2));
+    const legacy = toLegacyTavernRegexScript(regex as any);
+    await writeTextFileByPath(root, dirPath, filename, JSON.stringify(legacy, null, 2));
   }
 
   function findScriptByName(name: string): Script | null {
@@ -2419,10 +2932,10 @@ export const useImportStore = defineStore('resource-importer', () => {
   async function exportScript(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '脚本');
+    const dirPath = '脚本';
     const name = String(item.path || item.displayName || '').trim();
-    const filename = `${sanitizeFilename(name)}.${scriptExportFormat.value}`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = `${sanitizeExportStem(name)}.${scriptExportFormat.value}`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2430,16 +2943,16 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     const script = findScriptByName(name);
     if (!script) throw new Error('找不到该脚本（可能已被删除或重命名）');
-    await writeTextFile(dir, filename, String((script as any).content || ''));
+    await writeTextFileByPath(root, dirPath, filename, String((script as any).content || ''));
   }
 
   async function exportTheme(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '美化');
+    const dirPath = '美化';
     const name = String(item.path || item.displayName || '').trim();
-    const filename = `${sanitizeFilename(name)}.json`;
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = `${sanitizeExportStem(name)}.json`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2453,17 +2966,17 @@ export const useImportStore = defineStore('resource-importer', () => {
     const allThemes = Array.isArray(settingsData?.themes) ? settingsData.themes : [];
     const themeData = allThemes.find((t: any) => (typeof t === 'object' ? t?.name : t) === name);
     if (!themeData || typeof themeData !== 'object') throw new Error('找不到主题数据（仅支持导出对象型主题）');
-    await writeTextFile(dir, filename, JSON.stringify(themeData, null, 2));
+    await writeTextFileByPath(root, dirPath, filename, JSON.stringify(themeData, null, 2));
   }
 
   async function exportBackgroundFile(item: ImportEntry) {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
-    const dir = await ensureDir(root, '背景图');
+    const dirPath = '背景图';
     const bgfile = String(item.path || '').trim();
     if (!bgfile) throw new Error('背景缺少文件名');
-    const filename = sanitizeFilename(bgfile.split('/').pop() || bgfile);
-    if (shouldSkipIfExists() && (await tryGetFile(dir, filename))) {
+    const filename = sanitizeExportStem(bgfile.split('/').pop() || bgfile);
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
@@ -2472,7 +2985,7 @@ export const useImportStore = defineStore('resource-importer', () => {
     const resp = await fetch(`/backgrounds/${encodeURIComponent(bgfile)}`);
     if (!resp.ok) throw new Error(`导出背景失败: HTTP ${resp.status}`);
     const blob = await resp.blob();
-    await writeBlobFile(dir, filename, blob);
+    await writeBlobFileByPath(root, dirPath, filename, blob);
   }
 
   async function exportChat(item: ImportEntry) {
@@ -2510,16 +3023,15 @@ export const useImportStore = defineStore('resource-importer', () => {
       blob = new Blob([result], { type: 'text/plain' });
     }
 
-    const chatRoot = await ensureDir(root, '聊天');
-    const charDirName = sanitizeFilename(String(item.name || '角色').trim());
-    const charDir = await ensureDir(chatRoot, charDirName);
-    const filename = `${sanitizeFilename(chatName)}.jsonl`;
-    if (shouldSkipIfExists() && (await tryGetFile(charDir, filename))) {
+    const charDirName = sanitizeExportStem(String(item.name || '角色').trim());
+    const dirPath = `聊天/${charDirName}`;
+    const filename = `${sanitizeExportStem(chatName)}.jsonl`;
+    if (await shouldSkipExportFile(root, dirPath, filename)) {
       item.status = 'skipped';
       item.errorMessage = '文件已存在，已跳过';
       return;
     }
-    await writeBlobFile(charDir, filename, blob);
+    await writeBlobFileByPath(root, dirPath, filename, blob);
   }
 
   function buildExtensionBlock(ext: { id: string; name: string; url: string }) {
@@ -2530,14 +3042,14 @@ export const useImportStore = defineStore('resource-importer', () => {
     const root = rootDirHandle.value;
     if (!root) throw new Error('未选择导出目录');
 
-    const extDir = await ensureDir(root, '拓展');
-
-    // 兼容旧位置：根目录下的 拓展.txt
-    const legacyFile = await tryGetFile(root, '拓展.txt');
-    const legacyText = legacyFile ? await legacyFile.text() : '';
-
-    const existingFile = await tryGetFile(extDir, '拓展.txt');
-    const existingText = existingFile ? await existingFile.text() : legacyText;
+    const existingText = isArchiveExportActive()
+      ? ''
+      : await (async () => {
+          const legacyFile = await tryGetFileByPath(root, '', '拓展.txt');
+          const legacyText = legacyFile ? await legacyFile.text() : '';
+          const existingFile = await tryGetFileByPath(root, '拓展', '拓展.txt', { createDir: true });
+          return existingFile ? await existingFile.text() : legacyText;
+        })();
     const existingBlocks = existingText ? parseExtensionBlocks(existingText) : [];
     const existingParsed = existingBlocks
       .map(parseExtensionTxtBlock)
@@ -2604,7 +3116,7 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     const combinedBlocks = [...existingBlocks, ...newBlocks].filter(Boolean).map(s => s.trim()).filter(Boolean);
     const output = combinedBlocks.join('\n---\n') + '\n';
-    await writeTextFile(extDir, '拓展.txt', output);
+    await writeTextFileByPath(root, '拓展', '拓展.txt', output);
   }
 
   async function exportSingle(item: ImportEntry) {
@@ -2616,10 +3128,9 @@ export const useImportStore = defineStore('resource-importer', () => {
 
     if (!rootDirHandle.value) throw new Error('未选择导出目录');
 
-    try {
+    const runExportTask = async () => {
       if (item.type === 'extension_url') {
         await exportExtensionTxt([item]);
-        updateStats();
         return;
       }
 
@@ -2651,8 +3162,14 @@ export const useImportStore = defineStore('resource-importer', () => {
         default:
           item.status = 'skipped';
           item.errorMessage = '不支持的导出类型';
-          updateStats();
-          return;
+      }
+    };
+
+    try {
+      await withFileSystemRetry(`导出 ${item.displayName || item.path || item.id}`, runExportTask);
+      if (item.status === 'skipped') {
+        updateStats();
+        return;
       }
 
       if (item.status !== 'skipped') {
@@ -2661,7 +3178,7 @@ export const useImportStore = defineStore('resource-importer', () => {
       }
     } catch (error) {
       item.status = 'error';
-      item.errorMessage = error instanceof Error ? error.message : String(error);
+      item.errorMessage = normalizeExportError(error);
     }
 
     updateStats();
@@ -2673,13 +3190,26 @@ export const useImportStore = defineStore('resource-importer', () => {
     isProcessing.value = true;
     try {
       const targets = entries.value.filter(e => selectedIds.value.has(e.id) && e.status === 'pending');
+      const useMobileZip = shouldUseMobileZipExport(targets);
+      const archive = useMobileZip
+        ? createExportArchiveCollector(`资源导出_${targets.length}项_${formatFilenameTimestamp()}`)
+        : null;
       const ext = targets.filter(t => t.type === 'extension_url');
       const others = targets.filter(t => t.type !== 'extension_url');
-      if (ext.length > 0) {
-        await exportExtensionTxt(ext);
-        updateStats();
+      if (archive) activeExportArchive = archive;
+      try {
+        if (ext.length > 0) {
+          await exportExtensionTxt(ext);
+          updateStats();
+        }
+        for (const item of others) await exportSingle(item);
+      } finally {
+        activeExportArchive = null;
       }
-      for (const item of others) await exportSingle(item);
+      if (archive && archive.size() > 0) {
+        await archive.download();
+        toastr.success(`手机端已将 ${archive.size()} 个文件打包为 zip 下载`);
+      }
       selectedIds.value = new Set();
       buildOperationResult('导出结果', targets);
     } finally {
@@ -2872,7 +3402,12 @@ export const useImportStore = defineStore('resource-importer', () => {
             break;
           }
           case 'regex': {
-            const r = importRawTavernRegex(importName, text);
+            const parsed = safeParseJson(text);
+            let r = importRawTavernRegex(importName, text);
+            if (!r && looksLikeRegex(parsed)) {
+              const legacyText = JSON.stringify(toLegacyTavernRegexScript(parsed as any), null, 2);
+              if (legacyText !== text) r = importRawTavernRegex(importName, legacyText);
+            }
             if (!r) throw new Error('导入正则返回失败');
             break;
           }
