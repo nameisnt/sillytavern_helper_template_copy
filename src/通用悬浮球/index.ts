@@ -5,7 +5,7 @@ import { createScriptIdIframe, teleportStyle } from '@util/script';
 import App from './App.vue';
 
 type ToastLevel = 'success' | 'info' | 'warning' | 'error';
-type BallStatus = 'active' | 'hidden' | 'archived';
+type BallStatus = 'active' | 'hidden';
 type RegexRuleMode = 'extract_first' | 'extract_all' | 'replace';
 type FloatingBallOutputMode = 'html' | 'text' | 'url';
 
@@ -143,7 +143,9 @@ declare global {
 }
 
 const SCRIPT_NAME = '通用悬浮球';
-const MANAGER_BUTTON_NAME = '悬浮球管理';
+// Script button name must match the event key used by Tavern Helper (`getButtonEvent(name)`).
+// Using the script name keeps "delete button + re-enable script" behavior predictable in the script library UI.
+const MANAGER_BUTTON_NAME = SCRIPT_NAME;
 const SCRIPT_ID = getScriptId();
 const SCRIPT_VARIABLE_SCOPE = { type: 'script', script_id: SCRIPT_ID } as const;
 const ROOT_CLASS = 'th-ufb-root';
@@ -375,10 +377,7 @@ function getStatusLabel(status: BallStatus): string {
   if (status === 'active') {
     return '启用';
   }
-  if (status === 'hidden') {
-    return '停用';
-  }
-  return '归档';
+  return '停用';
 }
 
 function getOutputModeLabel(outputMode: FloatingBallOutputMode): string {
@@ -486,15 +485,27 @@ function executeMessageRules(contentSource: Extract<FloatingBallContentSource, {
   const rawMessage = String(message.message ?? '');
   let segments = [rawMessage];
   const warnings: string[] = [];
+  const enabledRules = contentSource.rules.filter(rule => rule.enabled);
   if (!rawMessage) {
     warnings.push('目标楼层原始消息为空。');
   }
 
-  for (const rule of contentSource.rules) {
-    if (!rule.enabled) {
-      continue;
+  if (contentSource.outputMode === 'html' && enabledRules.length === 0) {
+    try {
+      const renderedHtml = retrieveDisplayedMessage(message.message_id).html()?.trim() ?? '';
+      const fallbackHtml = formatAsDisplayedMessage(rawMessage, { message_id: message.message_id }).trim();
+      const html = renderedHtml || fallbackHtml;
+      if (html) {
+        segments = [html];
+      } else if (!rawMessage) {
+        segments = [];
+      }
+    } catch (error) {
+      warnings.push(`读取楼层显示内容失败，已回退到原始消息：${error instanceof Error ? error.message : String(error)}`);
     }
+  }
 
+  for (const rule of enabledRules) {
     try {
       if (rule.mode === 'replace') {
         const regex = buildRegex(rule);
@@ -584,12 +595,15 @@ function buildPreviewTabItems(outputMode: FloatingBallOutputMode, segments: stri
     });
   }
 
-  return segments.map((segment, index) => ({
-    key: `${outputMode}-${index}`,
-    label: `${outputMode === 'text' ? '文本' : '片段'} ${index + 1}`,
-    kind: outputMode,
-    content: segment,
-  }));
+  return segments.map((segment, index) => {
+    const shouldRenderAsText = outputMode === 'text' || (outputMode === 'html' && !looksLikeHtmlMarkup(segment));
+    return {
+      key: `${outputMode}-${index}`,
+      label: `${shouldRenderAsText ? '文本' : '片段'} ${index + 1}`,
+      kind: shouldRenderAsText ? 'text' : outputMode,
+      content: segment,
+    };
+  });
 }
 
 function getOrderedItems(data: ScriptData): FloatingBallItem[] {
@@ -628,7 +642,7 @@ function normalizeFloatingBall(value: unknown): FloatingBallSettings {
 function createBallItem(partial?: Partial<FloatingBallItem> & { id?: string; name?: string }): FloatingBallItem {
   const id = String(partial?.id ?? createBallId()).trim() || createBallId();
   const name = String(partial?.name ?? BALL_DEFAULT_TEXT).trim() || BALL_DEFAULT_TEXT;
-  const status = partial?.status === 'hidden' || partial?.status === 'archived' ? partial.status : 'active';
+  const status = partial?.status === 'hidden' ? partial.status : 'active';
 
   return {
     id,
@@ -645,7 +659,7 @@ function normalizeBallItem(value: unknown, fallbackId: string, fallbackName: str
   return createBallItem({
     id: String(raw.id ?? fallbackId).trim() || fallbackId,
     name: String(raw.name ?? fallbackName).trim() || fallbackName,
-    status: raw.status === 'hidden' || raw.status === 'archived' || raw.status === 'active' ? raw.status : 'active',
+    status: raw.status === 'hidden' || raw.status === 'archived' ? 'hidden' : 'active',
     webCode: String(raw.webCode ?? ''),
     floatingBall: raw.floatingBall as FloatingBallSettings | undefined,
     contentSource: raw.contentSource as FloatingBallContentSource | undefined,
@@ -750,44 +764,17 @@ function withErrorToast<TArgs extends unknown[]>(handler: (...args: TArgs) => vo
   };
 }
 
-function syncManagerButton(): void {
-  try {
-    if (typeof updateScriptButtonsWith === 'function') {
-      updateScriptButtonsWith(buttons => {
-        const nextButtons = Array.isArray(buttons) ? [...buttons] : [];
-        const legacyNames = ['输入网页代码', '悬浮球设置', '消息来源与规则'];
-
-        const upsert = (name: string, visible: boolean) => {
-          const index = nextButtons.findIndex(button => button?.name === name);
-          if (index === -1) {
-            nextButtons.push({ name, visible });
-            return;
-          }
-          nextButtons[index] = { ...nextButtons[index], name, visible };
-        };
-
-        upsert(MANAGER_BUTTON_NAME, true);
-        for (const legacyName of legacyNames) {
-          const index = nextButtons.findIndex(button => button?.name === legacyName);
-          if (index !== -1) {
-            nextButtons[index] = { ...nextButtons[index], name: legacyName, visible: false };
-          }
-        }
-        return nextButtons;
-      });
-      return;
-    }
-  } catch (error) {
-    console.warn(`[${SCRIPT_NAME}] updateScriptButtonsWith failed`, error);
-  }
-
+function syncManagerButton(): boolean {
   try {
     if (typeof appendInexistentScriptButtons === 'function') {
       appendInexistentScriptButtons([{ name: MANAGER_BUTTON_NAME, visible: true }]);
+      return true;
     }
   } catch (error) {
     console.warn(`[${SCRIPT_NAME}] appendInexistentScriptButtons failed`, error);
   }
+
+  return false;
 }
 
 function parseColorToRgba(value: string): { r: number; g: number; b: number; a: number } | null {
@@ -872,6 +859,10 @@ function getViewportSize(targetWindow: Window): ViewportSize {
     width: Math.max(0, Math.floor(targetWindow.innerWidth || 0)),
     height: Math.max(0, Math.floor(targetWindow.innerHeight || 0)),
   };
+}
+
+function looksLikeHtmlMarkup(value: string): boolean {
+  return /<\/?[a-z][\w:-]*\b[^>]*>/i.test(value) || /<!doctype|<!--/i.test(value);
 }
 
 function getDefaultBallPosition(targetWindow: Window, size: number, visibleIndex = 0): Point {
@@ -1056,6 +1047,7 @@ function injectPreviewBridge(html: string): string {
 
   const bridgeBaseStyle = '<style>html,body{margin:0;min-height:100%;background:transparent !important;}</style>';
   const bridgeScript = buildPreviewBridgeScript(SCRIPT_ID);
+
   const hasHtmlTag = /<\s*html[\s>]/i.test(code);
   const hasHeadOpenTag = /<\s*head[\s>]/i.test(code);
   const hasHeadCloseTag = /<\s*\/\s*head\s*>/i.test(code);
@@ -1089,6 +1081,35 @@ function injectPreviewBridge(html: string): string {
   ].join('\n');
 }
 
+function injectRulePreviewBridge(html: string): string {
+  const code = String(html ?? '').trim();
+  if (!code) {
+    return '';
+  }
+
+  const looksLikeFullDoc = /<!doctype/i.test(code) || /<\s*html[\s>]/i.test(code) || /<\s*head[\s>]/i.test(code);
+  if (looksLikeFullDoc) {
+    return injectPreviewBridge(code);
+  }
+
+  const fragmentStyle = `
+<style>
+  .th-ufb-rule-fragment{
+    white-space:pre-wrap;
+    word-break:break-word;
+  }
+</style>
+`.trim();
+
+  const wrapped = `<div class="th-ufb-rule-fragment">${code}</div>`;
+
+  return injectPreviewBridge(
+    ['<!doctype html>', '<html>', '  <head>', '    <meta charset="utf-8" />', `    ${fragmentStyle}`, '  </head>', '  <body>', wrapped, '  </body>', '</html>'].join(
+      '\n',
+    ),
+  );
+}
+
 class UniversalFloatingBallApp {
   private readonly hostWindow = window.parent ?? window;
   private readonly hostDocument = this.hostWindow.document ?? document;
@@ -1104,15 +1125,18 @@ class UniversalFloatingBallApp {
   private managerIframe: JQuery<HTMLIFrameElement> | null = null;
   private managerStyleDestroy: (() => void) | null = null;
   private managerPanicClose: JQuery<HTMLButtonElement> | null = null;
+  private managerButtonSyncTimeouts: number[] = [];
 
   async init(): Promise<void> {
-    syncManagerButton();
-    await this.initializeMvuBridge();
+    this.bindGlobalEvents();
+    this.startManagerButtonSync();
     this.mountRoot();
     this.mountStyle();
     this.renderBalls();
-    this.bindGlobalEvents();
     showToast('success', `${SCRIPT_NAME}脚本已加载`);
+    void this.initializeMvuBridge().catch(error => {
+      console.warn(`[${SCRIPT_NAME}] initializeMvuBridge failed`, error);
+    });
   }
 
   destroy(): void {
@@ -1120,6 +1144,7 @@ class UniversalFloatingBallApp {
     this.closeManagerApp();
     this.cleanupBridgeTimer?.();
     this.cleanupBridgeTimer = null;
+    this.stopManagerButtonSync();
     this.hostWindow.removeEventListener('resize', this.handleWindowResize);
     this.hostWindow.removeEventListener('pointermove', this.handleBallPointerMove);
     this.hostWindow.removeEventListener('pointerup', this.handleBallPointerUp);
@@ -1298,7 +1323,8 @@ class UniversalFloatingBallApp {
 .${PREVIEW_PANEL_CLASS} .${PANEL_BODY_CLASS}{
   padding:0;
   background:transparent;
-  overflow:visible;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
 }
 .${PANEL_FOOTER_CLASS}{
   flex:0 0 auto;
@@ -1454,7 +1480,6 @@ class UniversalFloatingBallApp {
 }
 .th-ufb-status--active{background:rgba(52,211,153,0.18);color:#bbf7d0}
 .th-ufb-status--hidden{background:rgba(245,158,11,0.18);color:#fde68a}
-.th-ufb-status--archived{background:rgba(148,163,184,0.16);color:#cbd5e1}
 
 .th-ufb-manager{
   display:grid;
@@ -1716,6 +1741,7 @@ class UniversalFloatingBallApp {
   border:0.5px solid rgba(255,255,255,0.1);
   background:rgba(7,10,18,0.9);
   overflow:hidden;
+  color:#fff;
 }
 .th-ufb-preview-placeholder{
   min-height:180px;
@@ -1768,8 +1794,30 @@ class UniversalFloatingBallApp {
   font-family:ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size:13px;
   line-height:1.55;
-  color:#e2e8f0;
+  color:#fff;
   background:rgba(11,15,25,0.92);
+}
+.th-ufb-preview-rendered{
+  min-height:240px;
+  padding:14px;
+  box-sizing:border-box;
+  background:rgba(11,15,25,0.96);
+  color:#fff;
+  overflow:auto;
+  -webkit-overflow-scrolling:touch;
+}
+.th-ufb-preview-rendered .mes_text{
+  max-width:none;
+  width:auto;
+  color:#fff;
+}
+.th-ufb-preview-rendered .mes_text,
+.th-ufb-preview-rendered .mes_text p,
+.th-ufb-preview-rendered .mes_text span,
+.th-ufb-preview-rendered .mes_text div,
+.th-ufb-preview-rendered .mes_text li,
+.th-ufb-preview-rendered .mes_text blockquote{
+  color:#fff !important;
 }
 .th-ufb-segment-list{
   display:flex;
@@ -1840,8 +1888,30 @@ class UniversalFloatingBallApp {
   }
 
   private bindGlobalEvents(): void {
-    eventOn(getButtonEvent(MANAGER_BUTTON_NAME), withErrorToast(() => this.openManagerApp()));
+    const openManager = withErrorToast(() => {
+      syncManagerButton();
+      this.openManagerApp();
+    });
+    syncManagerButton();
+    // Tavern Helper uses the button name as the event key, so keep it paired with the created button.
+    eventOn(getButtonEvent(MANAGER_BUTTON_NAME), openManager);
     this.hostWindow.addEventListener('resize', this.handleWindowResize);
+  }
+
+  private startManagerButtonSync(): void {
+    this.stopManagerButtonSync();
+    const sync = () => {
+      syncManagerButton();
+    };
+    sync();
+    this.managerButtonSyncTimeouts = [0, 300, 1000, 3000].map(delay => this.hostWindow.setTimeout(sync, delay));
+  }
+
+  private stopManagerButtonSync(): void {
+    for (const timer of this.managerButtonSyncTimeouts) {
+      this.hostWindow.clearTimeout(timer);
+    }
+    this.managerButtonSyncTimeouts = [];
   }
 
   private readonly handleWindowResize = () => {
@@ -2077,9 +2147,14 @@ class UniversalFloatingBallApp {
 
   private openManagerApp(): void {
     if (this.managerIframe) {
-      return;
+      const iframe = this.managerIframe[0];
+      if (iframe?.isConnected) {
+        return;
+      }
+      this.closeManagerApp();
     }
 
+    syncManagerButton();
     this.closeCurrentModal();
     const api = {
       readData: () => cloneData(readScriptData()),
@@ -2113,26 +2188,6 @@ class UniversalFloatingBallApp {
       onClose: () => this.closeManagerApp(),
     });
 
-    this.managerPanicClose = ($('<button type="button" title="关闭悬浮球管理">✕</button>') as JQuery<HTMLButtonElement>)
-      .appendTo('body')
-      .css({
-        position: 'fixed',
-        top: '12px',
-        right: '12px',
-        zIndex: 100000,
-        width: '34px',
-        height: '34px',
-        borderRadius: '10px',
-        border: '1px solid rgba(0,0,0,0.12)',
-        background: 'rgba(255,255,255,0.92)',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.18)',
-        cursor: 'pointer',
-        fontSize: '18px',
-        lineHeight: '34px',
-        color: '#111',
-      })
-      .on('click', () => this.closeManagerApp());
-
     this.managerIframe = createScriptIdIframe()
       .appendTo('body')
       .css({
@@ -2147,17 +2202,26 @@ class UniversalFloatingBallApp {
         margin: 0,
       })
       .on('load', () => {
-        const iframeDoc = this.managerIframe![0].contentDocument!;
-        const iframeBody = iframeDoc.body;
-        iframeBody.style.margin = '0';
-        iframeBody.style.padding = '0';
-        iframeBody.style.width = '100%';
-        iframeBody.style.height = '100%';
-        iframeBody.style.overflow = 'hidden';
+        try {
+          const iframeDoc = this.managerIframe?.[0]?.contentDocument;
+          const iframeBody = iframeDoc?.body;
+          if (!iframeDoc || !iframeBody || !this.managerApp) {
+            throw new Error('管理面板 iframe 尚未准备好。');
+          }
+          iframeBody.style.margin = '0';
+          iframeBody.style.padding = '0';
+          iframeBody.style.width = '100%';
+          iframeBody.style.height = '100%';
+          iframeBody.style.overflow = 'hidden';
 
-        const { destroy } = teleportStyle(iframeDoc.head);
-        this.managerStyleDestroy = destroy;
-        this.managerApp!.mount(iframeBody);
+          const { destroy } = teleportStyle(iframeDoc.head);
+          this.managerStyleDestroy = destroy;
+          this.managerApp.mount(iframeBody);
+        } catch (error) {
+          console.error(`[${SCRIPT_NAME}] manager app mount failed`, error);
+          this.closeManagerApp();
+          showToast('error', `悬浮球管理打开失败：${error instanceof Error ? error.message : String(error)}`);
+        }
       });
   }
 
@@ -2270,12 +2334,11 @@ class UniversalFloatingBallApp {
     statusRow.className = 'th-ufb-manager__status-actions';
     const activeButton = this.createStatusActionButton('启用', 'active');
     const hiddenButton = this.createStatusActionButton('停用', 'hidden');
-    const archivedButton = this.createStatusActionButton('归档', 'archived');
     const deleteButton = this.hostDocument.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = `${BUTTON_CLASS} ${GHOST_BUTTON_CLASS} th-ufb-manager__danger`;
     deleteButton.textContent = '删除';
-    statusRow.append(activeButton, hiddenButton, archivedButton, deleteButton);
+    statusRow.append(activeButton, hiddenButton, deleteButton);
     toolbar.append(nameInput, statusRow);
 
     const editor = this.hostDocument.createElement('div');
@@ -2287,7 +2350,7 @@ class UniversalFloatingBallApp {
 
     const hint = this.hostDocument.createElement('div');
     hint.className = 'th-ufb-hint';
-    hint.textContent = '启用：显示悬浮球；停用：保留配置但不显示；归档：收起备用，不参与当前界面。';
+    hint.textContent = '启用：显示悬浮球；停用：保留配置但不显示。';
     main.append(toolbar, editor, hint);
     manager.append(sidebar, main);
     modal.body.append(manager);
@@ -2311,7 +2374,6 @@ class UniversalFloatingBallApp {
       const buttons: Array<[HTMLButtonElement, BallStatus]> = [
         [activeButton, 'active'],
         [hiddenButton, 'hidden'],
-        [archivedButton, 'archived'],
       ];
       for (const [button, status] of buttons) {
         button.className =
@@ -2326,7 +2388,6 @@ class UniversalFloatingBallApp {
       const groups: Array<{ status: BallStatus; title: string }> = [
         { status: 'active', title: '启用中' },
         { status: 'hidden', title: '已停用' },
-        { status: 'archived', title: '已归档' },
       ];
 
       for (const group of groups) {
@@ -2409,8 +2470,6 @@ class UniversalFloatingBallApp {
 
     bindStatusButton(activeButton, 'active');
     bindStatusButton(hiddenButton, 'hidden');
-    bindStatusButton(archivedButton, 'archived');
-
     deleteButton.addEventListener('click', () => {
       if (draft.order.length <= 1) {
         showToast('warning', '至少保留一个悬浮球');
@@ -3465,6 +3524,25 @@ class UniversalFloatingBallApp {
     cleanupIframeControls = this.attachIframePreviewControls(modal, iframe, { enableBridgeSizing: true });
   }
 
+  private renderDisplayedMessagePreview(messageId: number, target: HTMLElement): boolean {
+    try {
+      const $displayed = retrieveDisplayedMessage(messageId);
+      if (!$displayed.length) {
+        return false;
+      }
+
+      const $clone = $displayed.clone(true, true);
+      const wrapper = this.hostDocument.createElement('div');
+      wrapper.className = 'th-ufb-preview-rendered';
+      wrapper.append($clone[0]);
+      target.append(wrapper);
+      return true;
+    } catch (error) {
+      console.warn(`[${SCRIPT_NAME}] renderDisplayedMessagePreview failed`, error);
+      return false;
+    }
+  }
+
   private openMessageRulesPreview(item: FloatingBallItem): void {
     if (item.contentSource.mode !== 'message_rules') {
       return;
@@ -3497,6 +3575,7 @@ class UniversalFloatingBallApp {
     }
 
     const tabs = buildPreviewTabItems(item.contentSource.outputMode, result.segments);
+    const enabledRules = item.contentSource.rules.filter(rule => rule.enabled);
     const activeKey = { value: tabs[0]?.key ?? '' };
     const contentCard = this.hostDocument.createElement('div');
     contentCard.className = 'th-ufb-preview-card';
@@ -3532,12 +3611,16 @@ class UniversalFloatingBallApp {
         return;
       }
 
+      if (activeTab.kind === 'html' && enabledRules.length === 0 && this.renderDisplayedMessagePreview(result.messageId, contentCard)) {
+        return;
+      }
+
       const iframe = this.hostDocument.createElement('iframe');
       iframe.className = 'th-ufb-iframe';
       iframe.setAttribute('frameborder', '0');
       iframe.style.height = '60svh';
       if (activeTab.kind === 'html') {
-        iframe.setAttribute('srcdoc', injectPreviewBridge(activeTab.content));
+        iframe.setAttribute('srcdoc', enabledRules.length > 0 ? injectRulePreviewBridge(activeTab.content) : injectPreviewBridge(activeTab.content));
       } else {
         iframe.setAttribute('src', activeTab.content);
       }
@@ -3587,14 +3670,28 @@ class UniversalFloatingBallApp {
   }
 }
 
-$(() => {
+function runOnReady(handler: () => void): void {
+  if (typeof $ === 'function') {
+    $(() => handler());
+    return;
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', handler, { once: true });
+    return;
+  }
+  handler();
+}
+
+runOnReady(() => {
   const app = new UniversalFloatingBallApp();
   void app.init().catch(error => {
     console.error(`[${SCRIPT_NAME}] init failed`, error);
     showToast('error', `${SCRIPT_NAME}初始化失败：${error instanceof Error ? error.message : String(error)}`);
   });
 
-  $(window).on('pagehide', () => {
-    app.destroy();
-  });
+  if (typeof $ === 'function') {
+    $(window).on('pagehide', () => app.destroy());
+  } else {
+    window.addEventListener('pagehide', () => app.destroy(), { once: true });
+  }
 });
