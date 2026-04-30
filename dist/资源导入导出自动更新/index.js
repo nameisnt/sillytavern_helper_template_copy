@@ -1,1 +1,0 @@
-import'https://testingcf.jsdelivr.net/gh/nameisnt/sillytavern_helper_template_copy/dist/资源导入导出/index.js';
